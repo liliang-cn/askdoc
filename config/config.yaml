@@ -1,0 +1,32 @@
+# AskDoc Configuration
+
+server:
+  host: "0.0.0.0"
+  port: 8080
+  base_url: "http://localhost:8080"
+
+admin:
+  api_key: ""  # Set via ASKDOC_ADMIN_API_KEY env var
+
+database:
+  path: "./data/askdoc.db"
+
+storage:
+  documents: "./data/documents"
+
+rag:
+  db_path: "./data/rag.db"  # Separate path for rago vector store
+  index_type: "hnsw"
+  chunk_size: 1000
+  chunk_overlap: 200
+
+llm:
+  provider: "ollama"
+  base_url: "http://localhost:11434/v1"
+  api_key: ""
+  embedding_model: "nomic-embed-text"
+  llm_model: "qwen2.5:7b"
+
+rate_limit:
+  enabled: true
+  requests_per_hour: 100

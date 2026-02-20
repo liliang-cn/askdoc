@@ -95,7 +95,7 @@ func NewOrchestratorService(cfg *config.Config) (*OrchestratorService, error) {
 	// Create document store
 	documentStore := ragstore.NewDocumentStore(sqliteStore.GetSqvectStore())
 
-	// Create processor
+	// Create processor (GraphRAG is disabled by default in rago since v2.25.2)
 	proc := processor.New(
 		embedder,
 		llmProvider,
@@ -157,96 +157,123 @@ func (s *OrchestratorService) IngestText(ctx context.Context, text, source strin
 	return s.ragClient.IngestText(ctx, text, source, opts)
 }
 
-// Chat uses rago Agent to answer questions with RAG context
-// The Agent will automatically:
-// 1. Recognize intent (question, search, action)
-// 2. Search RAG if needed
-// 3. Generate response
+// Chat uses simple RAG search + LLM generation (faster than Agent)
 func (s *OrchestratorService) Chat(ctx context.Context, message string, collectionIDs []string) (*askdocdomain.ChatResponse, error) {
-	if s.progressCallback != nil {
-		s.progressCallback("thinking", "Analyzing your question...")
-	}
-
-	// Use agent Chat - it handles RAG internally
-	result, err := s.agentService.Chat(ctx, message)
+	// 1. Generate embedding
+	vec, err := s.embedder.Embed(ctx, message)
 	if err != nil {
-		return nil, fmt.Errorf("agent chat failed: %w", err)
+		return nil, fmt.Errorf("embedding failed: %w", err)
 	}
 
-	// Extract answer from result
-	answer := ""
-	if result.FinalResult != nil {
-		switch v := result.FinalResult.(type) {
-		case string:
-			answer = v
-		case map[string]interface{}:
-			if content, ok := v["content"].(string); ok {
-				answer = content
-			} else if content, ok := v["answer"].(string); ok {
-				answer = content
-			} else {
-				answer = fmt.Sprintf("%v", v)
-			}
-		default:
-			answer = fmt.Sprintf("%v", v)
+	// 2. Search vector store directly
+	chunks, err := s.sqliteStore.Search(ctx, vec, 5)
+	if err != nil {
+		return nil, fmt.Errorf("search failed: %w", err)
+	}
+
+	// 3. Build context from sources
+	context := ""
+	sources := make([]askdocdomain.Source, len(chunks))
+	for i, chunk := range chunks {
+		context += fmt.Sprintf("[Document %d]\n%s\n\n", i+1, chunk.Content)
+		sources[i] = askdocdomain.Source{
+			DocumentID: chunk.DocumentID,
+			Content:    chunk.Content,
+			Score:      chunk.Score,
 		}
+	}
+
+	// 4. Generate answer using LLM
+	prompt := fmt.Sprintf(`Based on the following context, answer the question. If the context doesn't contain relevant information, say so.
+
+Context:
+%s
+
+Question: %s
+
+Answer:`, context, message)
+
+	answer, err := s.generator.Generate(ctx, prompt, nil)
+	if err != nil {
+		return nil, fmt.Errorf("generation failed: %w", err)
 	}
 
 	return &askdocdomain.ChatResponse{
 		Answer:  answer,
-		Sources: []askdocdomain.Source{}, // Agent doesn't return sources directly
+		Sources: sources,
 	}, nil
 }
 
-// ChatStream performs streaming chat with rago Agent
+// ChatStream performs streaming chat with simple RAG
 func (s *OrchestratorService) ChatStream(ctx context.Context, message string, collectionIDs []string) (<-chan askdocdomain.StreamChunk, error) {
 	ch := make(chan askdocdomain.StreamChunk, 100)
-
-	// Start agent stream
-	eventCh, err := s.agentService.RunStream(ctx, message)
-	if err != nil {
-		close(ch)
-		return nil, fmt.Errorf("agent stream failed: %w", err)
-	}
 
 	go func() {
 		defer close(ch)
 
-		for event := range eventCh {
-			switch event.Type {
-			case "thinking":
-				ch <- askdocdomain.StreamChunk{
-					Type:    "thinking",
-					Content: event.Content,
+		// 1. Generate embedding
+		ch <- askdocdomain.StreamChunk{Type: "thinking", Content: "Searching..."}
+		vec, err := s.embedder.Embed(ctx, message)
+		if err != nil {
+			ch <- askdocdomain.StreamChunk{Type: "error", Content: err.Error()}
+			return
+		}
+
+		// 2. Search vector store directly
+		chunks, err := s.sqliteStore.Search(ctx, vec, 5)
+		if err != nil {
+			ch <- askdocdomain.StreamChunk{Type: "error", Content: err.Error()}
+			return
+		}
+
+		if len(chunks) == 0 {
+			ch <- askdocdomain.StreamChunk{Type: "content", Content: "No relevant documents found."}
+			ch <- askdocdomain.StreamChunk{Type: "done"}
+			return
+		}
+
+		// 3. Build context and collect sources
+		context := ""
+		sources := make([]askdocdomain.Source, len(chunks))
+		for i, chunk := range chunks {
+			context += fmt.Sprintf("[Document %d]\n%s\n\n", i+1, chunk.Content)
+			filename := ""
+			if chunk.Metadata != nil {
+				if fn, ok := chunk.Metadata["filename"].(string); ok {
+					filename = fn
 				}
-			case "text":
-				ch <- askdocdomain.StreamChunk{
-					Type:    "content",
-					Content: event.Content,
-				}
-			case "tool_call":
-				ch <- askdocdomain.StreamChunk{
-					Type:    "thinking",
-					Content: fmt.Sprintf("Using tool: %s", event.ToolName),
-				}
-			case "tool_result":
-				ch <- askdocdomain.StreamChunk{
-					Type:    "thinking",
-					Content: fmt.Sprintf("Tool %s completed", event.ToolName),
-				}
-			case "done":
-				ch <- askdocdomain.StreamChunk{Type: "done"}
-				return
-			case "error":
-				ch <- askdocdomain.StreamChunk{
-					Type:    "error",
-					Content: event.Content,
-				}
-				return
+			}
+			sources[i] = askdocdomain.Source{
+				DocumentID: chunk.DocumentID,
+				Content:    chunk.Content,
+				Score:      chunk.Score,
+				Filename:   filename,
 			}
 		}
 
-		// If we exit the loop without "done", still send it
+		// 4. Stream generate answer
+		ch <- askdocdomain.StreamChunk{Type: "thinking", Content: "Generating..."}
+		prompt := fmt.Sprintf(`Based on the following context, answer the question concisely.
+
+Context:
+%s
+
+Question: %s
+
+Answer:`, context, message)
+
+		// Use streaming generation
+		err = s.generator.Stream(ctx, prompt, nil, func(chunk string) {
+			ch <- askdocdomain.StreamChunk{Type: "content", Content: chunk}
+		})
+		if err != nil {
+			ch <- askdocdomain.StreamChunk{Type: "error", Content: err.Error()}
+			return
+		}
+
+		// 5. Send sources
+		ch <- askdocdomain.StreamChunk{Type: "sources", Sources: sources}
+
 		ch <- askdocdomain.StreamChunk{Type: "done"}
 	}()
 
@@ -345,7 +372,7 @@ func (s *OrchestratorService) UpdateDocumentMetadata(ctx context.Context, id str
 		doc.Metadata[k] = v
 	}
 
-	return s.documentStore.Store(ctx, doc)
+	return s.documentStore.Update(ctx, doc)
 }
 
 // ragoDocToAskDoc converts rago Document to AskDoc Document

@@ -4,62 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AskDoc Admin</title>
-  <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f8fafc; }
-    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
-    header { background: white; padding: 16px 24px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
-    header h1 { font-size: 20px; color: #1e293b; }
-    .api-key { font-size: 12px; color: #64748b; }
-    nav { background: white; padding: 16px 24px; border-bottom: 1px solid #e2e8f0; }
-    nav a { color: #64748b; text-decoration: none; margin-right: 24px; font-size: 14px; }
-    nav a:hover, nav a.active { color: #3b82f6; }
-    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin: 20px 0; }
-    .stat-card { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-    .stat-card h3 { font-size: 12px; color: #64748b; text-transform: uppercase; margin-bottom: 8px; }
-    .stat-card .value { font-size: 28px; font-weight: 600; color: #1e293b; }
-    .section { background: white; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); margin: 20px 0; }
-    .section-header { padding: 16px 20px; border-bottom: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; }
-    .section-header h2 { font-size: 16px; color: #1e293b; }
-    .section-body { padding: 20px; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { text-align: left; padding: 12px 16px; border-bottom: 1px solid #f1f5f9; font-size: 14px; }
-    th { font-weight: 500; color: #64748b; }
-    td { color: #1e293b; }
-    .btn { padding: 8px 16px; border-radius: 6px; font-size: 14px; cursor: pointer; border: none; }
-    .btn-primary { background: #3b82f6; color: white; }
-    .btn-primary:hover { background: #2563eb; }
-    .btn-secondary { background: #f1f5f9; color: #475569; }
-    .btn-secondary:hover { background: #e2e8f0; }
-    .btn-danger { background: #fee2e2; color: #dc2626; }
-    .btn-danger:hover { background: #fecaca; }
-    .status { padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 500; }
-    .status-ready { background: #dcfce7; color: #16a34a; }
-    .status-pending { background: #fef3c7; color: #d97706; }
-    .status-processing { background: #dbeafe; color: #2563eb; }
-    .status-failed { background: #fee2e2; color: #dc2626; }
-    .modal { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; align-items: center; justify-content: center; }
-    .modal.open { display: flex; }
-    .modal-content { background: white; border-radius: 8px; width: 480px; max-width: 90%; }
-    .modal-header { padding: 16px 20px; border-bottom: 1px solid #e2e8f0; }
-    .modal-header h3 { font-size: 16px; }
-    .modal-body { padding: 20px; }
-    .modal-footer { padding: 16px 20px; border-top: 1px solid #e2e8f0; display: flex; justify-content: flex-end; gap: 8px; }
-    .form-group { margin-bottom: 16px; }
-    .form-group label { display: block; font-size: 14px; color: #475569; margin-bottom: 4px; }
-    .form-group input, .form-group textarea { width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 14px; }
-    .form-group input:focus, .form-group textarea:focus { outline: none; border-color: #3b82f6; }
-    .embed-code { background: #f8fafc; padding: 12px; border-radius: 6px; font-family: monospace; font-size: 12px; overflow-x: auto; }
-    .tabs { display: flex; gap: 4px; margin-bottom: 20px; }
-    .tab { padding: 8px 16px; background: #f1f5f9; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; }
-    .tab.active { background: #3b82f6; color: white; }
-    .hidden { display: none; }
-  </style>
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <header>
-    <h1>AskDoc Admin</h1>
-    <span class="api-key" id="apiKeyStatus">API Key: Not set</span>
+    <h1>AskDoc</h1>
+    <span class="api-key" id="apiKeyStatus">No API Key</span>
   </header>
 
   <nav>
@@ -69,9 +19,9 @@
   </nav>
 
   <div class="container">
-    <!-- Dashboard Section -->
+    <!-- Dashboard -->
     <div id="dashboard-section">
-      <div class="grid">
+      <div class="stats-grid">
         <div class="stat-card">
           <h3>Collections</h3>
           <div class="value" id="stat-collections">0</div>
@@ -101,7 +51,7 @@
       </div>
     </div>
 
-    <!-- Collections Section -->
+    <!-- Collections -->
     <div id="collections-section" class="hidden">
       <div class="section">
         <div class="section-header">
@@ -110,37 +60,23 @@
         </div>
         <div class="section-body">
           <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Documents</th>
-                <th>Created</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Name</th><th>Documents</th><th>Created</th><th>Actions</th></tr></thead>
             <tbody id="collections-list"></tbody>
           </table>
         </div>
       </div>
     </div>
 
-    <!-- Sites Section -->
+    <!-- Sites -->
     <div id="sites-section" class="hidden">
       <div class="section">
         <div class="section-header">
-          <h2>Sites (JS SDK)</h2>
+          <h2>Sites</h2>
           <button class="btn btn-primary" onclick="showCreateSiteModal()">+ New Site</button>
         </div>
         <div class="section-body">
           <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Domain</th>
-                <th>Collections</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
+            <thead><tr><th>Name</th><th>Domain</th><th>Collections</th><th>Actions</th></tr></thead>
             <tbody id="sites-list"></tbody>
           </table>
         </div>
@@ -153,6 +89,7 @@
     <div class="modal-content">
       <div class="modal-header">
         <h3>Create Collection</h3>
+        <button class="modal-close" onclick="closeModal('createCollectionModal')">&times;</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
@@ -176,6 +113,7 @@
     <div class="modal-content">
       <div class="modal-header">
         <h3>Create Site</h3>
+        <button class="modal-close" onclick="closeModal('createSiteModal')">&times;</button>
       </div>
       <div class="modal-body">
         <div class="form-group">
@@ -202,203 +140,64 @@
   <div class="modal" id="viewSiteModal">
     <div class="modal-content" style="width: 600px;">
       <div class="modal-header">
-        <h3>Site Embed Code</h3>
+        <h3>Embed Code</h3>
+        <button class="modal-close" onclick="closeModal('viewSiteModal')">&times;</button>
       </div>
       <div class="modal-body">
-        <p style="margin-bottom: 12px; color: #64748b;">Add this code to your website:</p>
+        <p class="text-muted mb-4">Add this code before the closing &lt;/body&gt; tag on your website:</p>
         <div class="embed-code" id="embedCode"></div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="copyEmbedCode()">Copy Code</button>
-        <button class="btn btn-primary" onclick="closeModal('viewSiteModal')">Close</button>
+        <button class="btn btn-primary" onclick="closeModal('viewSiteModal')">Done</button>
       </div>
     </div>
   </div>
 
-  <script>
-    const API_BASE = '/api/admin';
-    let apiKey = '';
+  <!-- Documents Modal -->
+  <div class="modal" id="documentsModal">
+    <div class="modal-content" style="width: 700px;">
+      <div class="modal-header">
+        <h3>Documents - <span id="documentsModalTitle"></span></h3>
+        <button class="modal-close" onclick="closeModal('documentsModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="upload-area" id="uploadArea">
+          <div class="upload-icon">📁</div>
+          <div class="upload-text">Drop files here or click to upload</div>
+        </div>
+        <input type="file" id="documentFile" accept=".txt,.md,.pdf,.doc,.docx,.adoc,.html,.htm" style="display:none">
+        <span id="uploadStatus"></span>
+        <table>
+          <thead><tr><th>File Name</th><th>Status</th><th>Chunks</th><th>Actions</th></tr></thead>
+          <tbody id="documents-list"></tbody>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-primary" onclick="closeModal('documentsModal')">Close</button>
+      </div>
+    </div>
+  </div>
 
-    // Initialize
-    document.addEventListener('DOMContentLoaded', () => {
-      // Get API key from URL param or prompt
-      const urlParams = new URLSearchParams(window.location.search);
-      apiKey = urlParams.get('key') || localStorage.getItem('askdoc_api_key') || '';
-      if (apiKey) {
-        document.getElementById('apiKeyStatus').textContent = 'API Key: ****' + apiKey.slice(-4);
-        localStorage.setItem('askdoc_api_key', apiKey);
-      }
-      loadStats();
-      loadCollections();
-      loadSites();
-      setupNavigation();
-    });
+  <!-- Chat Modal -->
+  <div class="modal" id="chatModal">
+    <div class="modal-content" style="width: 650px;">
+      <div class="modal-header">
+        <h3>💬 Chat - <span id="chatModalTitle"></span></h3>
+        <button class="modal-close" onclick="closeModal('chatModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="chat-container">
+          <div class="chat-messages" id="chatMessages"></div>
+          <div class="chat-input-area">
+            <input type="text" class="chat-input" id="chatInput" placeholder="Ask a question..." onkeypress="if(event.key==='Enter')sendChat()">
+            <button class="btn btn-primary" id="chatSendBtn" onclick="sendChat()">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
-    function setupNavigation() {
-      document.querySelectorAll('nav a').forEach(link => {
-        link.addEventListener('click', (e) => {
-          e.preventDefault();
-          const section = link.dataset.section;
-          document.querySelectorAll('nav a').forEach(l => l.classList.remove('active'));
-          link.classList.add('active');
-          document.querySelectorAll('[id$="-section"]').forEach(s => s.classList.add('hidden'));
-          document.getElementById(section + '-section').classList.remove('hidden');
-        });
-      });
-    }
-
-    async function api(method, path, body = null) {
-      const options = {
-        method,
-        headers: {
-          'Content-Type': 'application/json',
-          'X-API-Key': apiKey,
-        },
-      };
-      if (body) options.body = JSON.stringify(body);
-      const res = await fetch(API_BASE + path, options);
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
-      return res.json();
-    }
-
-    async function loadStats() {
-      try {
-        const stats = await api('GET', '/stats');
-        document.getElementById('stat-collections').textContent = stats.total_collections;
-        document.getElementById('stat-documents').textContent = stats.total_documents;
-        document.getElementById('stat-sites').textContent = stats.total_sites;
-        document.getElementById('stat-chats').textContent = stats.total_chats;
-      } catch (e) {
-        console.error('Failed to load stats', e);
-      }
-    }
-
-    async function loadCollections() {
-      try {
-        const data = await api('GET', '/collections');
-        const list = document.getElementById('collections-list');
-        list.innerHTML = data.collections.map(c => `
-          <tr>
-            <td>${c.name}</td>
-            <td>${c.document_count}</td>
-            <td>${new Date(c.created_at).toLocaleDateString()}</td>
-            <td>
-              <button class="btn btn-secondary" onclick="deleteCollection('${c.id}')">Delete</button>
-            </td>
-          </tr>
-        `).join('');
-      } catch (e) {
-        console.error('Failed to load collections', e);
-      }
-    }
-
-    async function loadSites() {
-      try {
-        const data = await api('GET', '/sites');
-        const list = document.getElementById('sites-list');
-        list.innerHTML = data.sites.map(s => `
-          <tr>
-            <td>${s.name}</td>
-            <td>${s.domain}</td>
-            <td>${s.collection_ids.length} collections</td>
-            <td>
-              <button class="btn btn-secondary" onclick="viewSite('${s.id}')">Embed Code</button>
-              <button class="btn btn-danger" onclick="deleteSite('${s.id}')">Delete</button>
-            </td>
-          </tr>
-        `).join('');
-      } catch (e) {
-        console.error('Failed to load sites', e);
-      }
-    }
-
-    function showCreateCollectionModal() {
-      document.getElementById('createCollectionModal').classList.add('open');
-    }
-
-    function showCreateSiteModal() {
-      document.getElementById('createSiteModal').classList.add('open');
-    }
-
-    function closeModal(id) {
-      document.getElementById(id).classList.remove('open');
-    }
-
-    async function createCollection() {
-      const name = document.getElementById('collectionName').value;
-      const description = document.getElementById('collectionDescription').value;
-      if (!name) return alert('Name is required');
-      try {
-        await api('POST', '/collections', { name, description });
-        closeModal('createCollectionModal');
-        loadCollections();
-        loadStats();
-      } catch (e) {
-        alert('Failed to create collection: ' + e.message);
-      }
-    }
-
-    async function createSite() {
-      const name = document.getElementById('siteName').value;
-      const domain = document.getElementById('siteDomain').value;
-      const collections = document.getElementById('siteCollections').value.split(',').map(s => s.trim()).filter(s => s);
-      if (!name || !domain || collections.length === 0) {
-        return alert('All fields are required');
-      }
-      try {
-        await api('POST', '/sites', { name, domain, collection_ids: collections });
-        closeModal('createSiteModal');
-        loadSites();
-        loadStats();
-      } catch (e) {
-        alert('Failed to create site: ' + e.message);
-      }
-    }
-
-    async function deleteCollection(id) {
-      if (!confirm('Delete this collection?')) return;
-      try {
-        await api('DELETE', '/collections/' + id);
-        loadCollections();
-        loadStats();
-      } catch (e) {
-        alert('Failed to delete: ' + e.message);
-      }
-    }
-
-    async function deleteSite(id) {
-      if (!confirm('Delete this site?')) return;
-      try {
-        await api('DELETE', '/sites/' + id);
-        loadSites();
-        loadStats();
-      } catch (e) {
-        alert('Failed to delete: ' + e.message);
-      }
-    }
-
-    async function viewSite(id) {
-      try {
-        const site = await api('GET', '/sites/' + id);
-        const embedCode = `<script>
-  window.AskDocConfig = {
-    siteId: '${site.id}',
-    serverUrl: '${window.location.origin}'
-  };
-<\/script>
-<script src="${window.location.origin}/sdk.js" async><\/script>`;
-        document.getElementById('embedCode').textContent = embedCode;
-        document.getElementById('viewSiteModal').classList.add('open');
-      } catch (e) {
-        alert('Failed to get site: ' + e.message);
-      }
-    }
-
-    function copyEmbedCode() {
-      const code = document.getElementById('embedCode').textContent;
-      navigator.clipboard.writeText(code);
-      alert('Copied to clipboard!');
-    }
-  </script>
+  <script src="app.js"></script>
 </body>
 </html>

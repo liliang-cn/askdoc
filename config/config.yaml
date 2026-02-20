@@ -2,8 +2,8 @@
 
 server:
   host: "0.0.0.0"
-  port: 8080
-  base_url: "http://localhost:8080"
+  port: 43510
+  base_url: "http://localhost:43510"
 
 admin:
   api_key: ""  # Set via ASKDOC_ADMIN_API_KEY env var
@@ -24,8 +24,8 @@ llm:
   provider: "ollama"
   base_url: "http://localhost:11434/v1"
   api_key: ""
-  embedding_model: "nomic-embed-text"
-  llm_model: "qwen2.5:7b"
+  embedding_model: "qwen3-embedding:8b"
+  llm_model: "qwen3:8b"
 
 rate_limit:
   enabled: true

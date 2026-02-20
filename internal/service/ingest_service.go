@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"os"
 	"path/filepath"
@@ -165,20 +166,27 @@ func (s *IngestService) ingestDocument(ctx context.Context, document *domain.Doc
 
 	if s.orchestrator != nil {
 		// Ingest using Orchestrator (stores document in rago)
+		log.Printf("[Ingest] Starting ingestion for document: %s", document.Filename)
 		resp, err := s.orchestrator.IngestFile(ctx, storagePath, metadata)
 		if err != nil {
 			ingestErr = err
+			log.Printf("[Ingest] IngestFile failed: %v", err)
 		} else {
 			chunkCount = resp.ChunkCount
 			// Update document ID to match rago's document ID
 			document.ID = resp.DocumentID
+			log.Printf("[Ingest] IngestFile success, docID=%s, chunks=%d", document.ID, chunkCount)
 
 			// Update metadata with chunk count and status
 			updateMeta := map[string]any{
 				domain.MetadataKeyChunkCount: chunkCount,
 				domain.MetadataKeyStatus:     domain.DocumentStatusReady,
 			}
-			s.orchestrator.UpdateDocumentMetadata(ctx, document.ID, updateMeta)
+			if err := s.orchestrator.UpdateDocumentMetadata(ctx, document.ID, updateMeta); err != nil {
+				log.Printf("[Ingest] UpdateDocumentMetadata failed: %v", err)
+			} else {
+				log.Printf("[Ingest] UpdateDocumentMetadata success")
+			}
 		}
 	} else {
 		// No orchestrator service, just mark as ready with 0 chunks

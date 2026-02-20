@@ -5,7 +5,7 @@ go 1.24.0
 require (
 	github.com/gin-gonic/gin v1.10.1
 	github.com/google/uuid v1.6.0
-	github.com/liliang-cn/rago/v2 v2.25.1
+	github.com/liliang-cn/rago/v2 v2.26.0
 	github.com/spf13/viper v1.20.1
 	go.uber.org/zap v1.27.0
 	modernc.org/sqlite v1.38.2
@@ -45,7 +45,7 @@ require (
 	github.com/liliang-cn/mcp-swagger-server v0.4.0 // indirect
 	github.com/liliang-cn/pipeit v0.1.0 // indirect
 	github.com/liliang-cn/skills-go v1.1.0 // indirect
-	github.com/liliang-cn/sqvect/v2 v2.6.0 // indirect
+	github.com/liliang-cn/sqvect/v2 v2.6.1 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-sqlite3 v1.14.32 // indirect
 	github.com/modelcontextprotocol/go-sdk v1.3.0-pre.1 // indirect
@@ -86,9 +86,4 @@ require (
 	modernc.org/libc v1.66.3 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-)
-
-replace (
-	github.com/liliang-cn/rago/v2 => ../rago
-	github.com/liliang-cn/sqvect/v2 => ../sqvect
 )

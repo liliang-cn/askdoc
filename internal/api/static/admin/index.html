@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>AskDoc Admin</title>
   <link rel="stylesheet" href="style.css">
 </head>
+
 <body>
   <header>
     <h1>AskDoc</h1>
@@ -60,7 +62,15 @@
         </div>
         <div class="section-body">
           <table>
-            <thead><tr><th>Name</th><th>Documents</th><th>Created</th><th>Actions</th></tr></thead>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Name</th>
+                <th>Documents</th>
+                <th>Created</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
             <tbody id="collections-list"></tbody>
           </table>
         </div>
@@ -76,7 +86,14 @@
         </div>
         <div class="section-body">
           <table>
-            <thead><tr><th>Name</th><th>Domain</th><th>Collections</th><th>Actions</th></tr></thead>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Domain</th>
+                <th>Collections</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
             <tbody id="sites-list"></tbody>
           </table>
         </div>
@@ -125,8 +142,9 @@
           <input type="text" id="siteDomain" placeholder="docs.example.com">
         </div>
         <div class="form-group">
-          <label>Collections (comma-separated IDs)</label>
-          <input type="text" id="siteCollections" placeholder="col_xxx, col_yyy">
+          <label>Collections</label>
+          <div id="siteCollections"
+            style="max-height:200px;overflow-y:auto;border:1px solid #d1d5db;border-radius:8px;padding:8px;"></div>
         </div>
       </div>
       <div class="modal-footer">
@@ -164,12 +182,21 @@
       <div class="modal-body">
         <div class="upload-area" id="uploadArea">
           <div class="upload-icon">📁</div>
-          <div class="upload-text">Drop files here or click to upload</div>
+          <div class="upload-text">Drop files here or click to upload<br><small style="opacity:.6">Support multiple
+              files</small></div>
         </div>
-        <input type="file" id="documentFile" accept=".txt,.md,.pdf,.doc,.docx,.adoc,.html,.htm" style="display:none">
-        <span id="uploadStatus"></span>
+        <input type="file" id="documentFile" accept=".txt,.md,.pdf,.doc,.docx,.adoc,.html,.htm" multiple
+          style="display:none">
+        <div id="uploadQueue" style="margin:8px 0"></div>
         <table>
-          <thead><tr><th>File Name</th><th>Status</th><th>Chunks</th><th>Actions</th></tr></thead>
+          <thead>
+            <tr>
+              <th>File Name</th>
+              <th>Status</th>
+              <th>Chunks</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
           <tbody id="documents-list"></tbody>
         </table>
       </div>
@@ -190,7 +217,8 @@
         <div class="chat-container">
           <div class="chat-messages" id="chatMessages"></div>
           <div class="chat-input-area">
-            <input type="text" class="chat-input" id="chatInput" placeholder="Ask a question..." onkeypress="if(event.key==='Enter')sendChat()">
+            <input type="text" class="chat-input" id="chatInput" placeholder="Ask a question..."
+              onkeypress="if(event.key==='Enter')sendChat()">
             <button class="btn btn-primary" id="chatSendBtn" onclick="sendChat()">Send</button>
           </div>
         </div>
@@ -200,4 +228,5 @@
 
   <script src="app.js"></script>
 </body>
+
 </html>

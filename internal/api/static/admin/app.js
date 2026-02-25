@@ -74,11 +74,12 @@ async function loadCollections() {
     const data = await api('GET', '/collections');
     const list = document.getElementById('collections-list');
     if (!data.collections || data.collections.length === 0) {
-      list.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No collections yet</td></tr>';
+      list.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No collections yet</td></tr>';
       return;
     }
     list.innerHTML = data.collections.map(c => `
       <tr>
+        <td style="font-size:12px;font-family:monospace;color:#6b7280;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer" title="${c.id}" onclick="navigator.clipboard.writeText('${c.id}');this.style.color='#10b981';setTimeout(()=>this.style.color='#6b7280',800)">${c.id.slice(0,8)}…</td>
         <td><strong>${escapeHtml(c.name)}</strong></td>
         <td>${c.document_count}</td>
         <td>${new Date(c.created_at).toLocaleDateString()}</td>
@@ -149,7 +150,7 @@ async function loadSites() {
 async function createSite() {
   const name = document.getElementById('siteName').value.trim();
   const domain = document.getElementById('siteDomain').value.trim();
-  const collections = document.getElementById('siteCollections').value.split(',').map(s => s.trim()).filter(s => s);
+  const collections = Array.from(document.querySelectorAll('#siteCollections input[type=checkbox]:checked')).map(cb => cb.value);
   if (!name || !domain || collections.length === 0) {
     return alert('All fields are required');
   }
@@ -186,7 +187,7 @@ async function viewSite(id) {
     serverUrl: '${window.location.origin}'
   };
 <\/script>
-<script src="${window.location.origin}/sdk.js" async><\/script>`;
+<script src="${window.location.origin}/widget.js" async><\/script>`;
     document.getElementById('embedCode').textContent = embedCode;
     openModal('viewSiteModal');
   } catch (e) {
@@ -200,57 +201,150 @@ function copyEmbedCode() {
 }
 
 // Documents
+let uploadPollingTimer = null;
+
 function setupFileUpload() {
   const fileInput = document.getElementById('documentFile');
   const uploadArea = document.getElementById('uploadArea');
 
   fileInput.addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file || !currentCollectionId) return;
-    await uploadFile(file);
+    const files = Array.from(e.target.files);
+    if (!files.length || !currentCollectionId) return;
+    await uploadFiles(files);
+    fileInput.value = '';
   });
 
-  // Drag and drop
   if (uploadArea) {
     uploadArea.addEventListener('dragover', (e) => {
       e.preventDefault();
       uploadArea.classList.add('dragover');
     });
-    uploadArea.addEventListener('dragleave', () => {
-      uploadArea.classList.remove('dragover');
-    });
+    uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
     uploadArea.addEventListener('drop', async (e) => {
       e.preventDefault();
       uploadArea.classList.remove('dragover');
-      const file = e.dataTransfer.files[0];
-      if (file && currentCollectionId) await uploadFile(file);
+      const files = Array.from(e.dataTransfer.files);
+      if (files.length && currentCollectionId) await uploadFiles(files);
     });
     uploadArea.addEventListener('click', () => fileInput.click());
   }
 }
 
-async function uploadFile(file) {
-  const formData = new FormData();
-  formData.append('file', file);
-  const status = document.getElementById('uploadStatus');
-  status.textContent = 'Uploading...';
+function createQueueItem(file) {
+  const queue = document.getElementById('uploadQueue');
+  const id = 'qi-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+  const el = document.createElement('div');
+  el.id = id;
+  el.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 10px;margin:2px 0;background:#f8fafc;border-radius:6px;font-size:13px;border:1px solid #e2e8f0';
+  el.innerHTML = `
+    <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${escapeHtml(file.name)}">${escapeHtml(file.name)}</span>
+    <span id="${id}-status" style="font-size:12px;white-space:nowrap;padding:2px 8px;border-radius:10px;background:#fef9c3;color:#854d0e">waiting</span>
+    <div id="${id}-bar" style="width:80px;height:6px;background:#e2e8f0;border-radius:3px;overflow:hidden;display:none">
+      <div id="${id}-fill" style="height:100%;width:0%;background:#3b82f6;transition:width .3s"></div>
+    </div>
+  `;
+  queue.appendChild(el);
+  return id;
+}
 
-  try {
-    const res = await fetch(API_BASE + '/collections/' + currentCollectionId + '/documents', {
-      method: 'POST',
-      headers: { 'X-API-Key': apiKey },
-      body: formData,
-    });
-    if (!res.ok) throw new Error('Upload failed: ' + res.status);
-    status.textContent = 'Uploaded!';
-    setTimeout(() => status.textContent = '', 2000);
-    loadDocuments(currentCollectionId);
-    loadCollections();
-    loadStats();
-  } catch (e) {
-    status.textContent = 'Error: ' + e.message;
+function setQueueStatus(id, label, color, bgColor, progress) {
+  const s = document.getElementById(id + '-status');
+  const bar = document.getElementById(id + '-bar');
+  const fill = document.getElementById(id + '-fill');
+  if (!s) return;
+  s.textContent = label;
+  s.style.background = bgColor;
+  s.style.color = color;
+  if (progress !== undefined && bar) {
+    bar.style.display = 'block';
+    fill.style.width = progress + '%';
+    if (progress > 0) fill.style.background = progress === 100 ? '#10b981' : '#3b82f6';
   }
-  document.getElementById('documentFile').value = '';
+}
+
+async function uploadFiles(files) {
+  const queue = document.getElementById('uploadQueue');
+  queue.innerHTML = '';
+  if (uploadPollingTimer) { clearInterval(uploadPollingTimer); uploadPollingTimer = null; }
+
+  // Map: qid -> docId (from API response)
+  const pendingDocs = new Map();
+
+  for (const file of files) {
+    const qid = createQueueItem(file);
+    setQueueStatus(qid, 'uploading', '#1d4ed8', '#dbeafe', 30);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await fetch(API_BASE + '/collections/' + currentCollectionId + '/documents', {
+        method: 'POST',
+        headers: { 'X-API-Key': apiKey },
+        body: formData,
+      });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const body = await res.json();
+      const docId = body.id || body.document?.id;
+      if (docId) pendingDocs.set(qid, docId);
+      setQueueStatus(qid, 'processing…', '#92400e', '#fef3c7', 60);
+    } catch (e) {
+      setQueueStatus(qid, 'upload failed', '#991b1b', '#fee2e2', 100);
+      const fill = document.getElementById(qid + '-fill');
+      if (fill) fill.style.background = '#ef4444';
+    }
+  }
+
+  loadCollections();
+  loadStats();
+  loadDocuments(currentCollectionId);
+
+  if (pendingDocs.size > 0) startProcessingPoll(pendingDocs);
+}
+
+function startProcessingPoll(pendingDocs) {
+  if (uploadPollingTimer) clearInterval(uploadPollingTimer);
+  let ticks = 0;
+  uploadPollingTimer = setInterval(async () => {
+    ticks++;
+    loadStats();
+
+    // Fetch all pages to find our docs by ID
+    let allDocs = [];
+    let page = 1;
+    while (true) {
+      try {
+        const data = await api('GET', '/collections/' + currentCollectionId + '/documents?page=' + page + '&page_size=50');
+        const docs = data.documents || [];
+        allDocs = allDocs.concat(docs);
+        if (docs.length < 50) break;
+        page++;
+      } catch (e) { break; }
+    }
+
+    const docMap = new Map(allDocs.map(d => [d.id, d]));
+
+    let remaining = 0;
+    pendingDocs.forEach((docId, qid) => {
+      const doc = docMap.get(docId);
+      if (!doc) return;
+      const s = doc.status;
+      if (s === 'ready' || s === 'completed') {
+        setQueueStatus(qid, 'ready ✓', '#065f46', '#d1fae5', 100);
+      } else if (s === 'failed') {
+        setQueueStatus(qid, 'failed', '#991b1b', '#fee2e2', 100);
+        const fill = document.getElementById(qid + '-fill');
+        if (fill) fill.style.background = '#ef4444';
+      } else {
+        remaining++;
+      }
+    });
+
+    await loadDocuments(currentCollectionId);
+
+    if (remaining === 0 || ticks > 60) {
+      clearInterval(uploadPollingTimer);
+      uploadPollingTimer = null;
+    }
+  }, 3000);
 }
 
 function viewDocuments(collectionId, collectionName) {
@@ -262,13 +356,21 @@ function viewDocuments(collectionId, collectionName) {
 
 async function loadDocuments(collectionId) {
   try {
-    const data = await api('GET', '/collections/' + collectionId + '/documents?page=1&page_size=50');
+    let allDocs = [];
+    let page = 1;
+    while (true) {
+      const data = await api('GET', '/collections/' + collectionId + '/documents?page=' + page + '&page_size=50');
+      const docs = data.documents || [];
+      allDocs = allDocs.concat(docs);
+      if (docs.length < 50) break;
+      page++;
+    }
     const list = document.getElementById('documents-list');
-    if (!data.documents || data.documents.length === 0) {
+    if (allDocs.length === 0) {
       list.innerHTML = '<tr><td colspan="4" class="text-center text-muted">No documents yet</td></tr>';
       return;
     }
-    list.innerHTML = data.documents.map(d => {
+    list.innerHTML = allDocs.map(d => {
       let statusClass = 'status-pending';
       if (d.status === 'ready' || d.status === 'completed') statusClass = 'status-ready';
       else if (d.status === 'processing' || d.status === 'indexing') statusClass = 'status-processing';
@@ -422,9 +524,27 @@ function showCreateCollectionModal() {
   document.getElementById('collectionName').focus();
 }
 
-function showCreateSiteModal() {
+async function showCreateSiteModal() {
+  // Load collections as checkboxes
+  const container = document.getElementById('siteCollections');
+  container.innerHTML = '<span style="color:#9ca3af">Loading...</span>';
   openModal('createSiteModal');
   document.getElementById('siteName').focus();
+  try {
+    const data = await api('GET', '/collections');
+    if (!data.collections || data.collections.length === 0) {
+      container.innerHTML = '<span style="color:#9ca3af">No collections available. Create one first.</span>';
+      return;
+    }
+    container.innerHTML = data.collections.map(c => `
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 4px;cursor:pointer;border-bottom:1px solid #f3f4f6">
+        <input type="checkbox" value="${c.id}" style="width:16px;height:16px">
+        <span><strong>${escapeHtml(c.name)}</strong> <span style="color:#9ca3af;font-size:12px">(${c.id.slice(0,8)}… · ${c.document_count} docs)</span></span>
+      </label>
+    `).join('');
+  } catch (e) {
+    container.innerHTML = '<span style="color:#ef4444">Failed to load collections</span>';
+  }
 }
 
 // Utility

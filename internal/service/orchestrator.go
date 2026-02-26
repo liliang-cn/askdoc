@@ -3,9 +3,12 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 
+	"github.com/google/uuid"
 	"github.com/liliang-cn/askdoc/internal/config"
 	askdocdomain "github.com/liliang-cn/askdoc/internal/domain"
+	sqvectcore "github.com/liliang-cn/sqvect/v2/pkg/core"
 	ragoconfig "github.com/liliang-cn/rago/v2/pkg/config"
 	ragodomain "github.com/liliang-cn/rago/v2/pkg/domain"
 	"github.com/liliang-cn/rago/v2/pkg/providers"
@@ -28,6 +31,7 @@ type OrchestratorService struct {
 	processor     ragodomain.Processor
 	documentStore *ragstore.DocumentStore
 	sqliteStore   *ragstore.SQLiteStore
+	sqvectCore    *sqvectcore.SQLiteStore // For chat session/message storage
 
 	// Agent service
 	agentService *agent.Service
@@ -128,6 +132,7 @@ func NewOrchestratorService(cfg *config.Config) (*OrchestratorService, error) {
 		processor:      proc,
 		documentStore:  documentStore,
 		sqliteStore:    sqliteStore,
+		sqvectCore:     sqliteStore.GetSqvectStore(),
 		agentService:   agentService,
 	}, nil
 }
@@ -204,12 +209,57 @@ Answer:`, context, message)
 	}, nil
 }
 
-// ChatStream performs streaming chat with simple RAG
-func (s *OrchestratorService) ChatStream(ctx context.Context, message string, collectionIDs []string) (<-chan askdocdomain.StreamChunk, error) {
+// ChatStream performs streaming chat with simple RAG and chat history
+func (s *OrchestratorService) ChatStream(ctx context.Context, message string, collectionIDs []string, sessionID string) (<-chan askdocdomain.StreamChunk, error) {
 	ch := make(chan askdocdomain.StreamChunk, 100)
 
 	go func() {
 		defer close(ch)
+
+		// Create or get session
+		var sess *sqvectcore.Session
+		var err error
+
+		if sessionID == "" {
+			// Create new session
+			sess = &sqvectcore.Session{
+				ID:     uuid.New().String(),
+				UserID: "default",
+			}
+			if err := s.sqvectCore.CreateSession(ctx, sess); err != nil {
+				ch <- askdocdomain.StreamChunk{Type: "error", Content: fmt.Sprintf("Failed to create session: %v", err)}
+				return
+			}
+			sessionID = sess.ID
+		} else {
+			sess, err = s.sqvectCore.GetSession(ctx, sessionID)
+			if err != nil {
+				// Session not found, create new one
+				sess = &sqvectcore.Session{
+					ID:     sessionID,
+					UserID: "default",
+				}
+				if err := s.sqvectCore.CreateSession(ctx, sess); err != nil {
+					ch <- askdocdomain.StreamChunk{Type: "error", Content: fmt.Sprintf("Failed to create session: %v", err)}
+					return
+				}
+			}
+		}
+
+		// Send session_id to client
+		ch <- askdocdomain.StreamChunk{Type: "session", SessionID: sessionID}
+
+		// Save user message
+		userMsg := &sqvectcore.Message{
+			ID:        uuid.New().String(),
+			SessionID: sessionID,
+			Role:      "user",
+			Content:   message,
+		}
+		if err := s.sqvectCore.AddMessage(ctx, userMsg); err != nil {
+			ch <- askdocdomain.StreamChunk{Type: "error", Content: fmt.Sprintf("Failed to save message: %v", err)}
+			return
+		}
 
 		// 1. Generate embedding
 		ch <- askdocdomain.StreamChunk{Type: "thinking", Content: "Searching..."}
@@ -233,10 +283,10 @@ func (s *OrchestratorService) ChatStream(ctx context.Context, message string, co
 		}
 
 		// 3. Build context and collect sources
-		context := ""
+		docContext := ""
 		sources := make([]askdocdomain.Source, len(chunks))
 		for i, chunk := range chunks {
-			context += fmt.Sprintf("[Document %d]\n%s\n\n", i+1, chunk.Content)
+			docContext += fmt.Sprintf("[Document %d]\n%s\n\n", i+1, chunk.Content)
 			filename := ""
 			if chunk.Metadata != nil {
 				if fn, ok := chunk.Metadata["filename"].(string); ok {
@@ -251,19 +301,45 @@ func (s *OrchestratorService) ChatStream(ctx context.Context, message string, co
 			}
 		}
 
-		// 4. Stream generate answer
+		// 4. Get chat history
+		history, err := s.sqvectCore.GetSessionHistory(ctx, sessionID, 10)
+		if err != nil {
+			// Non-fatal, continue without history
+			history = nil
+		}
+
+		// Build history context (excluding the current message we just added)
+		historyContext := ""
+		if len(history) > 1 {
+			var historyParts []string
+			for i := 0; i < len(history)-1; i++ {
+				msg := history[i]
+				role := "User"
+				if msg.Role == "assistant" {
+					role = "Assistant"
+				}
+				historyParts = append(historyParts, fmt.Sprintf("%s: %s", role, msg.Content))
+			}
+			if len(historyParts) > 0 {
+				historyContext = fmt.Sprintf("Previous conversation:\n%s\n\n", strings.Join(historyParts, "\n"))
+			}
+		}
+
+		// 5. Stream generate answer
 		ch <- askdocdomain.StreamChunk{Type: "thinking", Content: "Generating..."}
-		prompt := fmt.Sprintf(`Based on the following context, answer the question concisely.
+		prompt := fmt.Sprintf(`%sBased on the following context, answer the question concisely. If the question relates to previous conversation, use that context as well.
 
 Context:
 %s
 
 Question: %s
 
-Answer:`, context, message)
+Answer:`, historyContext, docContext, message)
 
 		// Use streaming generation
+		var fullAnswer strings.Builder
 		err = s.generator.Stream(ctx, prompt, nil, func(chunk string) {
+			fullAnswer.WriteString(chunk)
 			ch <- askdocdomain.StreamChunk{Type: "content", Content: chunk}
 		})
 		if err != nil {
@@ -271,7 +347,18 @@ Answer:`, context, message)
 			return
 		}
 
-		// 5. Send sources
+		// Save assistant message
+		assistantMsg := &sqvectcore.Message{
+			ID:        uuid.New().String(),
+			SessionID: sessionID,
+			Role:      "assistant",
+			Content:   fullAnswer.String(),
+		}
+		if err := s.sqvectCore.AddMessage(ctx, assistantMsg); err != nil {
+			// Non-fatal, log but continue
+		}
+
+		// 6. Send sources
 		ch <- askdocdomain.StreamChunk{Type: "sources", Sources: sources}
 
 		ch <- askdocdomain.StreamChunk{Type: "done"}

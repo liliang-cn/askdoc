@@ -32,7 +32,7 @@ func SetupRouter(
 		c.JSON(200, gin.H{"status": "ok"})
 	})
 
-	// Static files (admin UI, SDK)
+	// Static files (admin UI, widget)
 	SetupStaticRoutes(r)
 
 	// Widget API (public, based on site_id)

@@ -1,4 +1,4 @@
-// AskDoc SDK Entry Point
+// AskDoc Widget Entry Point
 
 export { AskDocWidget } from './widget';
 export { APIClient } from './api';

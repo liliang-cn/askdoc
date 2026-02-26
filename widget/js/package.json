@@ -1,7 +1,7 @@
 {
-  "name": "@liliang-cn/askdoc-sdk",
+  "name": "@liliang-cn/askdoc-widget",
   "version": "0.1.0",
-  "description": "AskDoc JS SDK - Embeddable document Q&A widget",
+  "description": "AskDoc Widget - Embeddable document Q&A widget",
   "main": "dist/askdoc.umd.js",
   "module": "dist/askdoc.es.js",
   "types": "dist/index.d.ts",

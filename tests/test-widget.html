@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AskDoc Widget Demo</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .demo-card {
+      background: white;
+      border-radius: 24px;
+      padding: 48px;
+      max-width: 600px;
+      text-align: center;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+    }
+
+    h1 {
+      font-size: 32px;
+      color: #1e293b;
+      margin-bottom: 16px;
+    }
+
+    p {
+      color: #64748b;
+      font-size: 16px;
+      line-height: 1.6;
+      margin-bottom: 24px;
+    }
+
+    .embed-code {
+      background: #1e293b;
+      color: #e2e8f0;
+      padding: 20px;
+      border-radius: 12px;
+      text-align: left;
+      font-family: 'Monaco', 'Menlo', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      overflow-x: auto;
+    }
+
+    .hint {
+      margin-top: 24px;
+      padding: 16px;
+      background: #f0f9ff;
+      border-radius: 12px;
+      color: #0369a1;
+      font-size: 14px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="demo-card">
+    <h1>AskDoc Widget Demo</h1>
+    <p>Click the chat bubble in the bottom-right corner to start a conversation with the AI assistant.</p>
+
+    <div class="embed-code" id="embedCode">
+    </div>
+    <script>
+      document.getElementById('embedCode').textContent =
+        `<script>
+  window.AskDocConfig = {
+    siteId: '0150c958-42cf-4117-a379-1c51a3afcefa',
+    serverUrl: '${window.location.origin}',
+    primaryColor: '#3b82f6',
+    position: 'bottom-right',
+    welcomeMessage: 'Hi! How can I help you today?',
+    placeholder: 'Ask about DRBD or LINBIT...'
+  };
+<\/script>
+<script src="${window.location.origin}/widget.js" async><\/script>`;
+    </script>
+
+    <div class="hint">
+      <strong>New in v2.0.2:</strong> SSE streaming, expandable sources, chat history, modern UI
+    </div>
+  </div>
+
+  <!-- AskDoc Widget -->
+  <script>
+    window.AskDocConfig = {
+      siteId: '0150c958-42cf-4117-a379-1c51a3afcefa',
+      serverUrl: window.location.origin,
+      primaryColor: '#3b82f6',
+      position: 'bottom-right',
+      welcomeMessage: 'Hi! How can I help you today?',
+      placeholder: 'Ask about DRBD or LINBIT...'
+    };
+  </script>
+  <script>
+    // Dynamically load widget.js from the same origin
+    var s = document.createElement('script');
+    s.src = window.location.origin + '/widget.js?v=2.0.3';
+    s.async = true;
+    document.body.appendChild(s);
+  </script>
+</body>
+
+</html>

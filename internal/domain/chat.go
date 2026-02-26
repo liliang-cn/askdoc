@@ -43,9 +43,10 @@ type ChatResponse struct {
 
 // StreamChunk represents a chunk in SSE stream
 type StreamChunk struct {
-	Type    string   `json:"type"` // thinking, content, sources, done, error
-	Content string   `json:"content,omitempty"`
-	Sources []Source `json:"sources,omitempty"`
+	Type      string   `json:"type"` // thinking, content, sources, done, error
+	Content   string   `json:"content,omitempty"`
+	Sources   []Source `json:"sources,omitempty"`
+	SessionID string   `json:"session_id,omitempty"`
 }
 
 // Stats represents system statistics

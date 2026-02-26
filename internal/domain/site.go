@@ -2,7 +2,7 @@ package domain
 
 import "time"
 
-// Site represents a JS SDK configuration
+// Site represents a widget configuration
 type Site struct {
 	ID            string       `json:"id"`
 	Name          string       `json:"name"`

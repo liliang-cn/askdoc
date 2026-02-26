@@ -8,12 +8,12 @@ import (
 
 // Config holds all configuration for AskDoc
 type Config struct {
-	Server   ServerConfig   `mapstructure:"server"`
-	Admin    AdminConfig    `mapstructure:"admin"`
-	Database DatabaseConfig `mapstructure:"database"`
-	Storage  StorageConfig  `mapstructure:"storage"`
-	RAG      RAGConfig      `mapstructure:"rag"`
-	LLM      LLMConfig      `mapstructure:"llm"`
+	Server    ServerConfig    `mapstructure:"server"`
+	Admin     AdminConfig     `mapstructure:"admin"`
+	Database  DatabaseConfig  `mapstructure:"database"`
+	Storage   StorageConfig   `mapstructure:"storage"`
+	RAG       RAGConfig       `mapstructure:"rag"`
+	LLM       LLMConfig       `mapstructure:"llm"`
 	RateLimit RateLimitConfig `mapstructure:"rate_limit"`
 }
 
@@ -62,7 +62,7 @@ type RateLimitConfig struct {
 	RequestsPerHour int  `mapstructure:"requests_per_hour"`
 }
 
-// Load loads configuration from file and environment
+// Load loads configuration from YAML file
 func Load(configPath string) (*Config, error) {
 	v := viper.New()
 
@@ -78,10 +78,6 @@ func Load(configPath string) (*Config, error) {
 		v.AddConfigPath(".")
 		v.AddConfigPath("./config")
 	}
-
-	// Environment variables
-	v.SetEnvPrefix("ASKDOC")
-	v.AutomaticEnv()
 
 	// Read config
 	if err := v.ReadInConfig(); err != nil {
@@ -101,8 +97,8 @@ func Load(configPath string) (*Config, error) {
 
 func setDefaults(v *viper.Viper) {
 	v.SetDefault("server.host", "0.0.0.0")
-	v.SetDefault("server.port", 8080)
-	v.SetDefault("server.base_url", "http://localhost:8080")
+	v.SetDefault("server.port", 43510)
+	v.SetDefault("server.base_url", "http://localhost:43510")
 
 	v.SetDefault("admin.api_key", "")
 

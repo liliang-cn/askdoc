@@ -1,0 +1,36 @@
+[Unit]
+Description=AskDoc - AI Document Q&A Service
+Documentation=https://github.com/liliang-cn/askdoc
+After=network.target
+
+[Service]
+Type=simple
+User=askdoc
+Group=askdoc
+WorkingDirectory=/var/lib/askdoc
+
+# Binary and config
+ExecStart=/usr/local/bin/askdoc --config /etc/askdoc/config.yaml
+
+# Restart policy
+Restart=on-failure
+RestartSec=5
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=2G
+
+# Security
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/askdoc
+ReadOnlyPaths=/etc/askdoc
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=askdoc
+
+[Install]
+WantedBy=multi-user.target

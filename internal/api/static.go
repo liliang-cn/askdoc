@@ -13,10 +13,10 @@ var StaticFS embed.FS
 
 // SetupStaticRoutes sets up routes for serving static files
 func SetupStaticRoutes(r *gin.Engine) error {
-	// Serve SDK
-	r.GET("/sdk.js", func(c *gin.Context) {
+	// Serve Widget
+	r.GET("/widget.js", func(c *gin.Context) {
 		c.Header("Content-Type", "application/javascript")
-		c.FileFromFS("static/sdk.js", http.FS(StaticFS))
+		c.FileFromFS("static/widget.js", http.FS(StaticFS))
 	})
 
 	// Serve admin UI - use single catch-all route that handles all /admin/* paths

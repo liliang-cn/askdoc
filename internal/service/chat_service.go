@@ -116,7 +116,7 @@ func (s *ChatService) ChatStream(ctx context.Context, siteID string, req *domain
 
 	// Use Orchestrator Agent for streaming if available
 	if s.orchestrator != nil {
-		return s.orchestrator.ChatStream(ctx, req.Message, site.CollectionIDs)
+		return s.orchestrator.ChatStream(ctx, req.Message, site.CollectionIDs, req.SessionID)
 	}
 
 	// Fallback to simple streaming

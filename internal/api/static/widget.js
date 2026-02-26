@@ -1,7 +1,7 @@
 /**
- * AskDoc SDK v2.0.1
- * A beautiful JavaScript SDK for embedding AskDoc chat widgets
- * Features: SSE streaming, expandable sources, modern UI
+ * AskDoc Widget v2.0.2
+ * A beautiful JavaScript widget for embedding AskDoc chat
+ * Features: SSE streaming, expandable sources, chat history, modern UI
  *
  * Usage:
  *   <script>
@@ -14,7 +14,7 @@
  *       placeholder: 'Ask a question...'
  *     };
  *   </script>
- *   <script src="https://your-server.com/sdk.js" async></script>
+ *   <script src="https://your-server.com/widget.js" async></script>
  */
 
 (function(root, factory) {
@@ -222,6 +222,9 @@
 
     handleChunk(chunk) {
       switch (chunk.type) {
+        case 'session':
+          this.sessionId = chunk.session_id;
+          break;
         case 'thinking':
           this.updateAssistantContent(`<span class="askdoc-thinking">${this.escapeHtml(chunk.content || 'Searching...')}</span>`);
           break;

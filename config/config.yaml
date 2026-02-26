@@ -22,7 +22,7 @@ rag:
 
 llm:
   provider: "ollama"
-  base_url: "http://localhost:11434/v1"
+  base_url: "https://api.132999.xyz/v1"
   api_key: ""
   embedding_model: "qwen3-embedding:8b"
   llm_model: "qwen3:8b"

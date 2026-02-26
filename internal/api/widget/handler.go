@@ -32,7 +32,16 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 func (h *Handler) GetConfig(c *gin.Context) {
 	siteID := c.Param("site_id")
 
-	config, err := h.widgetService.GetWidgetConfig(c.Request.Context(), siteID)
+	// Determine scheme from request (support reverse proxy headers)
+	scheme := "http"
+	if c.Request.TLS != nil {
+		scheme = "https"
+	}
+	if proto := c.GetHeader("X-Forwarded-Proto"); proto != "" {
+		scheme = proto
+	}
+
+	config, err := h.widgetService.GetWidgetConfig(c.Request.Context(), siteID, scheme, c.Request.Host)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "site not found"})
 		return

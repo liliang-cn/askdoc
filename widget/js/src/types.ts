@@ -1,4 +1,4 @@
-// AskDoc SDK Types
+// AskDoc Widget Types
 
 export interface AskDocConfig {
   siteId: string;

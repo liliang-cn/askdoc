@@ -1,0 +1,42 @@
+# AskDoc Configuration
+# Copy this file to /etc/askdoc/config.yaml and modify as needed
+
+server:
+  # Server port (use port > 3000 to avoid conflicts)
+  port: 43510
+  host: 0.0.0.0
+  # Public URL for widget embed code
+  base_url: "http://localhost:43510"
+
+admin:
+  # API key for admin endpoints (CHANGE THIS IN PRODUCTION!)
+  api_key: "change-me-in-production"
+
+database:
+  path: "/var/lib/askdoc/data/askdoc.db"
+
+storage:
+  documents: "/var/lib/askdoc/documents"
+
+llm:
+  # Ollama or OpenAI-compatible API
+  base_url: "https://api.132999.xyz/v1"
+  api_key: "ollama"
+  # LLM model for answer generation
+  llm_model: "qwen3:8b"
+  # Embedding model for document indexing
+  embedding_model: "qwen3-embedding:8b"
+
+rag:
+  # Database path
+  db_path: "/var/lib/askdoc/data/rag.db"
+  # Index type: hnsw, ivf, flat
+  index_type: "hnsw"
+  # Chunk size for document splitting
+  chunk_size: 512
+  # Overlap between chunks
+  chunk_overlap: 50
+
+rate_limit:
+  enabled: true
+  requests_per_hour: 100

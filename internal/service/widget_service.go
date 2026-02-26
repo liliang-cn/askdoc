@@ -18,10 +18,10 @@ type WidgetConfigResponse struct {
 
 // WidgetService handles widget operations
 type WidgetService struct {
-	cfg          *config.Config
-	siteRepo     *repository.SiteRepository
-	sessionRepo  *repository.SessionRepository
-	chatService  *ChatService
+	cfg         *config.Config
+	siteRepo    *repository.SiteRepository
+	sessionRepo *repository.SessionRepository
+	chatService *ChatService
 }
 
 // NewWidgetService creates a new widget service
@@ -40,7 +40,9 @@ func NewWidgetService(
 }
 
 // GetWidgetConfig returns the widget configuration for a site
-func (s *WidgetService) GetWidgetConfig(ctx context.Context, siteID string) (*WidgetConfigResponse, error) {
+// requestHost is the Host header from the incoming request, used to generate a dynamic base_url
+// so that LAN clients get the correct URL instead of localhost.
+func (s *WidgetService) GetWidgetConfig(ctx context.Context, siteID string, requestScheme, requestHost string) (*WidgetConfigResponse, error) {
 	site, err := s.siteRepo.Get(siteID)
 	if err != nil {
 		return nil, err
@@ -49,11 +51,21 @@ func (s *WidgetService) GetWidgetConfig(ctx context.Context, siteID string) (*Wi
 		return nil, domain.ErrNotFound
 	}
 
+	// Derive base_url from the request so LAN clients get the right address
+	baseURL := s.cfg.Server.BaseURL
+	if requestHost != "" {
+		scheme := requestScheme
+		if scheme == "" {
+			scheme = "http"
+		}
+		baseURL = scheme + "://" + requestHost
+	}
+
 	return &WidgetConfigResponse{
 		SiteID:  site.ID,
 		Name:    site.Name,
 		Config:  site.WidgetConfig,
-		BaseURL: s.cfg.Server.BaseURL,
+		BaseURL: baseURL,
 	}, nil
 }
 

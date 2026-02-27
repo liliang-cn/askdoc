@@ -209,162 +209,151 @@ Answer:`, context, message)
 	}, nil
 }
 
-// ChatStream performs streaming chat with simple RAG and chat history
+// ChatStream performs streaming chat using rago Agent for multi-turn RAG queries
+// Agent automatically searches documents and ensures answers are grounded in document context
 func (s *OrchestratorService) ChatStream(ctx context.Context, message string, collectionIDs []string, sessionID string) (<-chan askdocdomain.StreamChunk, error) {
 	ch := make(chan askdocdomain.StreamChunk, 100)
 
 	go func() {
 		defer close(ch)
 
-		// Create or get session
-		var sess *sqvectcore.Session
-		var err error
-
+		// Set or create session for multi-turn conversation
 		if sessionID == "" {
-			// Create new session
-			sess = &sqvectcore.Session{
-				ID:     uuid.New().String(),
-				UserID: "default",
-			}
-			if err := s.sqvectCore.CreateSession(ctx, sess); err != nil {
-				ch <- askdocdomain.StreamChunk{Type: "error", Content: fmt.Sprintf("Failed to create session: %v", err)}
-				return
-			}
-			sessionID = sess.ID
-		} else {
-			sess, err = s.sqvectCore.GetSession(ctx, sessionID)
-			if err != nil {
-				// Session not found, create new one
-				sess = &sqvectcore.Session{
-					ID:     sessionID,
-					UserID: "default",
-				}
-				if err := s.sqvectCore.CreateSession(ctx, sess); err != nil {
-					ch <- askdocdomain.StreamChunk{Type: "error", Content: fmt.Sprintf("Failed to create session: %v", err)}
-					return
-				}
-			}
+			sessionID = uuid.New().String()
 		}
+		s.agentService.SetSessionID(sessionID)
 
 		// Send session_id to client
 		ch <- askdocdomain.StreamChunk{Type: "session", SessionID: sessionID}
 
-		// Save user message
-		userMsg := &sqvectcore.Message{
-			ID:        uuid.New().String(),
-			SessionID: sessionID,
-			Role:      "user",
-			Content:   message,
-		}
-		if err := s.sqvectCore.AddMessage(ctx, userMsg); err != nil {
-			ch <- askdocdomain.StreamChunk{Type: "error", Content: fmt.Sprintf("Failed to save message: %v", err)}
-			return
-		}
-
-		// 1. Generate embedding
-		ch <- askdocdomain.StreamChunk{Type: "thinking", Content: "Searching..."}
-		vec, err := s.embedder.Embed(ctx, message)
+		// Use rago Agent's RunStream for intelligent multi-turn RAG queries
+		eventChan, err := s.agentService.RunStream(ctx, message)
 		if err != nil {
-			ch <- askdocdomain.StreamChunk{Type: "error", Content: err.Error()}
+			ch <- askdocdomain.StreamChunk{Type: "error", Content: fmt.Sprintf("Failed to start agent: %v", err)}
 			return
 		}
 
-		// 2. Search vector store directly
-		chunks, err := s.sqliteStore.Search(ctx, vec, 5)
-		if err != nil {
-			ch <- askdocdomain.StreamChunk{Type: "error", Content: err.Error()}
-			return
-		}
-
-		if len(chunks) == 0 {
-			ch <- askdocdomain.StreamChunk{Type: "content", Content: "No relevant documents found."}
-			ch <- askdocdomain.StreamChunk{Type: "done"}
-			return
-		}
-
-		// 3. Build context and collect sources
-		docContext := ""
-		sources := make([]askdocdomain.Source, len(chunks))
-		for i, chunk := range chunks {
-			docContext += fmt.Sprintf("[Document %d]\n%s\n\n", i+1, chunk.Content)
-			filename := ""
-			if chunk.Metadata != nil {
-				if fn, ok := chunk.Metadata["filename"].(string); ok {
-					filename = fn
-				}
-			}
-			sources[i] = askdocdomain.Source{
-				DocumentID: chunk.DocumentID,
-				Content:    chunk.Content,
-				Score:      chunk.Score,
-				Filename:   filename,
-			}
-		}
-
-		// 4. Get chat history
-		history, err := s.sqvectCore.GetSessionHistory(ctx, sessionID, 10)
-		if err != nil {
-			// Non-fatal, continue without history
-			history = nil
-		}
-
-		// Build history context (excluding the current message we just added)
-		historyContext := ""
-		if len(history) > 1 {
-			var historyParts []string
-			for i := 0; i < len(history)-1; i++ {
-				msg := history[i]
-				role := "User"
-				if msg.Role == "assistant" {
-					role = "Assistant"
-				}
-				historyParts = append(historyParts, fmt.Sprintf("%s: %s", role, msg.Content))
-			}
-			if len(historyParts) > 0 {
-				historyContext = fmt.Sprintf("Previous conversation:\n%s\n\n", strings.Join(historyParts, "\n"))
-			}
-		}
-
-		// 5. Stream generate answer
-		ch <- askdocdomain.StreamChunk{Type: "thinking", Content: "Generating..."}
-		prompt := fmt.Sprintf(`%sBased on the following context, answer the question concisely. If the question relates to previous conversation, use that context as well.
-
-Context:
-%s
-
-Question: %s
-
-Answer:`, historyContext, docContext, message)
-
-		// Use streaming generation
 		var fullAnswer strings.Builder
-		err = s.generator.Stream(ctx, prompt, nil, func(chunk string) {
-			fullAnswer.WriteString(chunk)
-			ch <- askdocdomain.StreamChunk{Type: "content", Content: chunk}
-		})
-		if err != nil {
-			ch <- askdocdomain.StreamChunk{Type: "error", Content: err.Error()}
-			return
+		var ragSources []ragodomain.Chunk
+
+		// Process streaming events from agent
+		for evt := range eventChan {
+			switch evt.Type {
+			case agent.EventTypeThinking:
+				ch <- askdocdomain.StreamChunk{Type: "thinking", Content: evt.Content}
+
+			case agent.EventTypePartial:
+				fullAnswer.WriteString(evt.Content)
+				ch <- askdocdomain.StreamChunk{Type: "content", Content: evt.Content}
+
+			case agent.EventTypeToolCall:
+				if evt.ToolName == "rag_query" {
+					ch <- askdocdomain.StreamChunk{Type: "thinking", Content: "Searching documents..."}
+				}
+
+			case agent.EventTypeComplete:
+				if fullAnswer.Len() == 0 && evt.Content != "" {
+					fullAnswer.WriteString(evt.Content)
+				}
+				// Collect sources from agent (v2.41.1+ includes sources from prepareContext)
+				if len(evt.Sources) > 0 {
+					ragSources = evt.Sources
+				}
+
+			case agent.EventTypeError:
+				ch <- askdocdomain.StreamChunk{Type: "error", Content: evt.Content}
+				return
+			}
 		}
 
-		// Save assistant message
-		assistantMsg := &sqvectcore.Message{
-			ID:        uuid.New().String(),
-			SessionID: sessionID,
-			Role:      "assistant",
-			Content:   fullAnswer.String(),
-		}
-		if err := s.sqvectCore.AddMessage(ctx, assistantMsg); err != nil {
-			// Non-fatal, log but continue
+		// Convert rago sources to askdoc sources
+		sources := convertRagoSources(ragSources)
+
+		// Verify answer is grounded in documents
+		if len(sources) > 0 && fullAnswer.Len() > 0 {
+			ch <- askdocdomain.StreamChunk{Type: "thinking", Content: "Verifying..."}
+			verified := s.verifyAnswerGrounded(ctx, fullAnswer.String(), sources)
+			if !verified {
+				warning := "\n\n⚠️ **Note**: This answer may not be fully supported by the uploaded documents."
+				ch <- askdocdomain.StreamChunk{Type: "content", Content: warning}
+			}
+		} else if len(sources) == 0 && fullAnswer.Len() > 0 {
+			warning := "\n\n⚠️ **Note**: No relevant documents found to support this answer."
+			ch <- askdocdomain.StreamChunk{Type: "content", Content: warning}
 		}
 
-		// 6. Send sources
-		ch <- askdocdomain.StreamChunk{Type: "sources", Sources: sources}
+		// Send collected sources
+		if len(sources) > 0 {
+			ch <- askdocdomain.StreamChunk{Type: "sources", Sources: sources}
+		}
 
 		ch <- askdocdomain.StreamChunk{Type: "done"}
 	}()
 
 	return ch, nil
+}
+
+// convertRagoSources converts rago domain.Chunk to askdoc Source
+func convertRagoSources(chunks []ragodomain.Chunk) []askdocdomain.Source {
+	if len(chunks) == 0 {
+		return nil
+	}
+	sources := make([]askdocdomain.Source, len(chunks))
+	for i, chunk := range chunks {
+		filename := ""
+		if chunk.Metadata != nil {
+			if fn, ok := chunk.Metadata["filename"].(string); ok {
+				filename = fn
+			}
+		}
+		sources[i] = askdocdomain.Source{
+			DocumentID: chunk.DocumentID,
+			Content:    chunk.Content,
+			Score:      chunk.Score,
+			Filename:   filename,
+		}
+	}
+	return sources
+}
+
+// verifyAnswerGrounded checks if the answer is grounded in the provided sources
+func (s *OrchestratorService) verifyAnswerGrounded(ctx context.Context, answer string, sources []askdocdomain.Source) bool {
+	if len(sources) == 0 || answer == "" {
+		return false
+	}
+
+	// Build source context
+	var sourceContext strings.Builder
+	for i, src := range sources {
+		sourceContext.WriteString(fmt.Sprintf("[Doc %d] %s\n", i+1, src.Content))
+		if sourceContext.Len() > 2000 {
+			break
+		}
+	}
+
+	// Use LLM to verify
+	prompt := fmt.Sprintf(`You are a fact-checker. Determine if the following answer is supported by the provided document excerpts.
+
+Answer to verify:
+%s
+
+Document excerpts:
+%s
+
+Instructions:
+- Answer "YES" if the answer's key claims are supported by the documents
+- Answer "NO" if the answer contains significant information NOT found in the documents
+- Only output YES or NO, nothing else.
+
+Verdict:`, answer, sourceContext.String())
+
+	verdict, err := s.generator.Generate(ctx, prompt, nil)
+	if err != nil {
+		// On error, assume verified (fail open)
+		return true
+	}
+
+	return strings.Contains(strings.ToUpper(strings.TrimSpace(verdict)), "YES")
 }
 
 // Search performs a pure vector search without LLM generation

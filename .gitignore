@@ -34,3 +34,6 @@ go.work.sum
 bin/
 
 data/
+
+# Config with secrets
+config/config.yaml

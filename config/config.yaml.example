@@ -19,6 +19,7 @@ rag:
   index_type: "hnsw"
   chunk_size: 1000
   chunk_overlap: 200
+  skills_path: "./skills"  # Path to skills directory
 
 llm:
   provider: "ollama"

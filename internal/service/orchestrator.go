@@ -3,21 +3,23 @@ package service
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/liliang-cn/askdoc/internal/config"
 	askdocdomain "github.com/liliang-cn/askdoc/internal/domain"
-	sqvectcore "github.com/liliang-cn/sqvect/v2/pkg/core"
 	ragoconfig "github.com/liliang-cn/rago/v2/pkg/config"
 	ragodomain "github.com/liliang-cn/rago/v2/pkg/domain"
 	"github.com/liliang-cn/rago/v2/pkg/providers"
 	"github.com/liliang-cn/rago/v2/pkg/rag"
 	"github.com/liliang-cn/rago/v2/pkg/rag/processor"
 	ragstore "github.com/liliang-cn/rago/v2/pkg/rag/store"
+	sqvectcore "github.com/liliang-cn/sqvect/v2/pkg/core"
 
 	// rago agent
 	"github.com/liliang-cn/rago/v2/pkg/agent"
+	"github.com/liliang-cn/rago/v2/pkg/skills"
 )
 
 // OrchestratorService integrates rago agent for document Q&A with full storage management
@@ -111,29 +113,50 @@ func NewOrchestratorService(cfg *config.Config) (*OrchestratorService, error) {
 		nil, // memory service
 	)
 
+	// Create and load skills service if configured (before agent to enable PTC integration)
+	var skillsService *skills.Service
+	if cfg.RAG.SkillsPath != "" {
+		skillsPath, err := filepath.Abs(cfg.RAG.SkillsPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve skills path: %w", err)
+		}
+		skillsCfg := skills.DefaultConfig()
+		skillsCfg.Paths = []string{skillsPath}
+		skillsService, err = skills.NewService(skillsCfg)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create skills service: %w", err)
+		}
+		if err := skillsService.LoadAll(ctx); err != nil {
+			return nil, fmt.Errorf("failed to load skills: %w", err)
+		}
+	}
+
 	// Create agent service with RAG processor
-	agentDBPath := cfg.RAG.DBPath + ".agent" // Agent session storage
+	agentDBPath := cfg.RAG.DBPath + ".agent"
 	agentService, err := agent.NewService(
-		llmProvider,
-		nil,    // mcpService - no MCP tools for now
-		proc,   // ragProcessor - enables RAG in agent
-		agentDBPath,
-		nil,    // memoryService - optional
+		llmProvider, // Use our LLM provider
+		nil,         // mcpService
+		proc,        // ragProcessor
+		agentDBPath, // dbPath
+		nil,         // memoryService
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create agent service: %w", err)
 	}
 
+	// Set system prompt
+	agentService.SetAgentInstructions("You are a technical documentation Q&A assistant. Generate COMPLETE, copy-paste ready how-to guides with FULL commands.\n\nResponse Rules:\n1. Provide COMPLETE commands that can be directly copied and executed\n2. Include ALL required parameters and options\n3. Use full command examples, not shorthand\n4. Group related commands into numbered steps\n5. Each step should be a complete, runnable command\n\nProcess:\n1. Use rag_query to search uploaded docs\n2. Find complete command examples from docs\n3. Assemble into copy-paste ready guide\n4. Cite source documents\n\nIf docs don't have complete commands, say so honestly.")
+
 	return &OrchestratorService{
-		cfg:            cfg,
-		ragClient:      ragClient,
-		embedder:       embedder,
-		generator:      llmProvider,
-		processor:      proc,
-		documentStore:  documentStore,
-		sqliteStore:    sqliteStore,
-		sqvectCore:     sqliteStore.GetSqvectStore(),
-		agentService:   agentService,
+		cfg:           cfg,
+		ragClient:     ragClient,
+		embedder:      embedder,
+		generator:     llmProvider,
+		processor:     proc,
+		documentStore: documentStore,
+		sqliteStore:   sqliteStore,
+		sqvectCore:    sqliteStore.GetSqvectStore(),
+		agentService:  agentService,
 	}, nil
 }
 

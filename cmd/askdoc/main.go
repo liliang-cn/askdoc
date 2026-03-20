@@ -95,8 +95,8 @@ func main() {
 	srv := &http.Server{
 		Addr:         cfg.Address(),
 		Handler:      router,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		ReadTimeout:  60 * time.Second,
+		WriteTimeout: 5 * time.Minute, // 5 minutes for long LLM responses
 		IdleTimeout:  120 * time.Second,
 	}
 

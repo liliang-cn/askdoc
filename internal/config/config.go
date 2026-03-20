@@ -45,6 +45,7 @@ type RAGConfig struct {
 	IndexType    string `mapstructure:"index_type"`
 	ChunkSize    int    `mapstructure:"chunk_size"`
 	ChunkOverlap int    `mapstructure:"chunk_overlap"`
+	SkillsPath   string `mapstructure:"skills_path"`
 }
 
 // LLMConfig holds LLM provider configuration
@@ -109,6 +110,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("rag.index_type", "hnsw")
 	v.SetDefault("rag.chunk_size", 1000)
 	v.SetDefault("rag.chunk_overlap", 200)
+	v.SetDefault("rag.skills_path", "./skills")
 
 	v.SetDefault("llm.provider", "ollama")
 	v.SetDefault("llm.base_url", "http://localhost:11434/v1")

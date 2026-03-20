@@ -198,9 +198,10 @@
       this.input.value = '';
       this.setStreaming(true);
 
-      // Create assistant message container
+      // Create assistant message container with buffer
       this.currentAssistantMsg = this.createAssistantMessage();
       this.currentSources = [];
+      this.contentBuffer = ''; // Memory buffer for streaming content
 
       try {
         await this.api.chatStream(
@@ -208,8 +209,12 @@
           (chunk) => this.handleChunk(chunk)
         );
       } catch (error) {
-        this.updateAssistantContent(`<span class="askdoc-error">Error: ${this.escapeHtml(error.message)}</span>`);
+        this.contentBuffer += `\n\n**Error:** ${error.message}`;
+        this.renderContent();
       }
+
+      // Final markdown render
+      this.renderContent();
 
       // Add sources if available
       if (this.currentSources.length > 0) {
@@ -226,28 +231,91 @@
           this.sessionId = chunk.session_id;
           break;
         case 'thinking':
-          this.updateAssistantContent(`<span class="askdoc-thinking">${this.escapeHtml(chunk.content || 'Searching...')}</span>`);
+          this.showThinking(chunk.content || 'Processing...');
           break;
         case 'content':
-          this.removeThinking();
-          this.appendAssistantContent(chunk.content || '');
+          this.hideThinking();
+          this.contentBuffer += chunk.content || '';
+          this.renderContent();
           break;
         case 'sources':
           this.currentSources = chunk.sources || [];
           break;
         case 'done':
-          this.removeThinking();
+          this.hideThinking();
           break;
         case 'error':
-          this.updateAssistantContent(`<span class="askdoc-error">Error: ${this.escapeHtml(chunk.content)}</span>`);
+          this.hideThinking();
+          this.contentBuffer += `\n\n<span class="askdoc-error">Error: ${this.escapeHtml(chunk.content)}</span>`;
+          this.renderContent();
           break;
+      }
+    }
+
+    // Simple markdown renderer (handles incomplete markdown during streaming)
+    renderMarkdown(text) {
+      if (!text) return '';
+
+      let html = this.escapeHtml(text);
+
+      // Code blocks - handle both complete and incomplete
+      // Complete code blocks
+      html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code class="language-$1">$2</code></pre>');
+      // Incomplete code blocks (opened but not closed)
+      html = html.replace(/```(\w*)\n([\s\S]*?)$/g, '<pre class="askdoc-code-incomplete"><code class="language-$1">$2...</code></pre>');
+
+      // Inline code
+      html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+      // Bold and italic
+      html = html.replace(/\*\*\*([^*]+)\*\*\*/g, '<strong><em>$1</em></strong>');
+      html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      html = html.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+
+      // Headers
+      html = html.replace(/^### (.+)$/gm, '<h4>$1</h4>');
+      html = html.replace(/^## (.+)$/gm, '<h3>$1</h3>');
+      html = html.replace(/^# (.+)$/gm, '<h2>$1</h2>');
+
+      // Links
+      html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+
+      // Lists
+      html = html.replace(/^\- (.+)$/gm, '<li>$1</li>');
+      html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+
+      // Numbered lists
+      html = html.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+
+      // Paragraphs (double newlines)
+      html = html.replace(/\n\n/g, '</p><p>');
+      html = '<p>' + html + '</p>';
+
+      // Clean up empty paragraphs
+      html = html.replace(/<p>\s*<\/p>/g, '');
+
+      // Line breaks
+      html = html.replace(/\n/g, '<br>');
+
+      return html;
+    }
+
+    renderContent() {
+      if (this.currentAssistantMsg && this.contentBuffer !== undefined) {
+        const content = this.currentAssistantMsg.querySelector('.askdoc-message-content');
+        if (content) {
+          content.innerHTML = this.renderMarkdown(this.contentBuffer);
+        }
+        this.scrollToBottom();
       }
     }
 
     addMessage(role, content) {
       const msg = document.createElement('div');
       msg.className = `askdoc-message ${role}`;
-      msg.innerHTML = `<div class="askdoc-message-content">${this.escapeHtml(content)}</div>`;
+      // User messages: plain text, Assistant messages: markdown
+      const html = role === 'user' ? this.escapeHtml(content) : this.renderMarkdown(content);
+      msg.innerHTML = `<div class="askdoc-message-content">${html}</div>`;
       this.messagesContainer?.appendChild(msg);
       this.scrollToBottom();
     }
@@ -278,8 +346,23 @@
     }
 
     removeThinking() {
+      this.hideThinking();
+    }
+
+    showThinking(text) {
+      this.hideThinking();
+      if (!this.currentAssistantMsg) return;
+
+      const thinking = document.createElement('div');
+      thinking.className = 'askdoc-thinking-indicator';
+      thinking.innerHTML = `<span class="askdoc-thinking">${this.escapeHtml(text)}</span>`;
+      this.currentAssistantMsg.appendChild(thinking);
+      this.scrollToBottom();
+    }
+
+    hideThinking() {
       if (this.currentAssistantMsg) {
-        const thinking = this.currentAssistantMsg.querySelector('.askdoc-thinking');
+        const thinking = this.currentAssistantMsg.querySelector('.askdoc-thinking-indicator');
         if (thinking) thinking.remove();
       }
     }
@@ -490,9 +573,13 @@
         #askdoc-widget .askdoc-message.user {
           align-self: flex-end;
           background: var(--askdoc-primary);
-          color: white;
+          color: white !important;
           border-bottom-right-radius: 6px;
           box-shadow: 0 2px 8px rgba(59, 130, 246, 0.25);
+        }
+        #askdoc-widget .askdoc-message.user .askdoc-message-content,
+        #askdoc-widget .askdoc-message.user .askdoc-message-content * {
+          color: white !important;
         }
         #askdoc-widget .askdoc-message.assistant {
           align-self: flex-start;
@@ -502,6 +589,47 @@
           border: 1px solid #e2e8f0;
           box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
         }
+        #askdoc-widget .askdoc-message-content p { margin: 0 0 10px 0; }
+        #askdoc-widget .askdoc-message-content p:last-child { margin-bottom: 0; }
+        #askdoc-widget .askdoc-message-content code {
+          background: #f1f5f9;
+          padding: 2px 6px;
+          border-radius: 4px;
+          font-size: 13px;
+          font-family: ui-monospace, monospace;
+        }
+        #askdoc-widget .askdoc-message-content pre {
+          background: #1e293b;
+          color: #e2e8f0;
+          padding: 12px;
+          border-radius: 8px;
+          overflow-x: auto;
+          margin: 10px 0;
+        }
+        #askdoc-widget .askdoc-message-content pre code {
+          background: transparent;
+          padding: 0;
+          color: inherit;
+        }
+        #askdoc-widget .askdoc-message-content h2,
+        #askdoc-widget .askdoc-message-content h3,
+        #askdoc-widget .askdoc-message-content h4 {
+          margin: 16px 0 8px 0;
+          font-weight: 600;
+        }
+        #askdoc-widget .askdoc-message-content h2 { font-size: 18px; }
+        #askdoc-widget .askdoc-message-content h3 { font-size: 16px; }
+        #askdoc-widget .askdoc-message-content h4 { font-size: 15px; }
+        #askdoc-widget .askdoc-message-content ul {
+          margin: 8px 0;
+          padding-left: 20px;
+        }
+        #askdoc-widget .askdoc-message-content li { margin: 4px 0; }
+        #askdoc-widget .askdoc-message-content a {
+          color: var(--askdoc-primary);
+          text-decoration: none;
+        }
+        #askdoc-widget .askdoc-message-content a:hover { text-decoration: underline; }
         #askdoc-widget .askdoc-thinking {
           color: #94a3b8;
           font-style: italic;
@@ -519,6 +647,10 @@
         }
         @keyframes askdoc-spin { to { transform: rotate(360deg); } }
         #askdoc-widget .askdoc-error { color: #dc2626; }
+        #askdoc-widget .askdoc-thinking-indicator {
+          margin-top: 8px;
+          padding: 8px 0;
+        }
 
         /* Sources */
         #askdoc-widget .askdoc-sources {

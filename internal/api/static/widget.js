@@ -91,7 +91,7 @@
       const serverUrl = config.serverUrl || this.detectServerUrl();
       this.api = new APIClient(serverUrl, config.siteId);
       this.widgetConfig = null;
-      this.sessionId = null;
+      this.sessionId = this.loadSessionId();
       this.container = null;
       this.bubble = null;
       this.chatWindow = null;
@@ -127,6 +127,34 @@
         console.warn('AskDoc: Could not load config, using defaults');
       }
       this.render();
+    }
+
+    getStorageKey() {
+      return `askdoc_session_${this.config.siteId}`;
+    }
+
+    loadSessionId() {
+      try {
+        return localStorage.getItem(this.getStorageKey()) || null;
+      } catch {
+        return null;
+      }
+    }
+
+    saveSessionId(sessionId) {
+      try {
+        localStorage.setItem(this.getStorageKey(), sessionId);
+      } catch {
+        // Ignore storage errors
+      }
+    }
+
+    clearSessionId() {
+      try {
+        localStorage.removeItem(this.getStorageKey());
+      } catch {
+        // Ignore storage errors
+      }
     }
 
     render() {
@@ -229,6 +257,7 @@
       switch (chunk.type) {
         case 'session':
           this.sessionId = chunk.session_id;
+          this.saveSessionId(this.sessionId);
           break;
         case 'thinking':
           this.showThinking(chunk.content || 'Processing...');

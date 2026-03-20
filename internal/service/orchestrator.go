@@ -3,117 +3,157 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
 	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/liliang-cn/agent-go/v2/pkg/agent"
+	agentconfig "github.com/liliang-cn/agent-go/v2/pkg/config"
+	agentdomain "github.com/liliang-cn/agent-go/v2/pkg/domain"
+	"github.com/liliang-cn/agent-go/v2/pkg/pool"
+	"github.com/liliang-cn/agent-go/v2/pkg/rag"
+	"github.com/liliang-cn/agent-go/v2/pkg/rag/chunker"
+	ragprocessor "github.com/liliang-cn/agent-go/v2/pkg/rag/processor"
+	ragstore "github.com/liliang-cn/agent-go/v2/pkg/rag/store"
+	"github.com/liliang-cn/agent-go/v2/pkg/services"
+	"github.com/liliang-cn/agent-go/v2/pkg/skills"
 	"github.com/liliang-cn/askdoc/internal/config"
 	askdocdomain "github.com/liliang-cn/askdoc/internal/domain"
-	ragoconfig "github.com/liliang-cn/rago/v2/pkg/config"
-	ragodomain "github.com/liliang-cn/rago/v2/pkg/domain"
-	"github.com/liliang-cn/rago/v2/pkg/providers"
-	"github.com/liliang-cn/rago/v2/pkg/rag"
-	"github.com/liliang-cn/rago/v2/pkg/rag/processor"
-	ragstore "github.com/liliang-cn/rago/v2/pkg/rag/store"
-	sqvectcore "github.com/liliang-cn/sqvect/v2/pkg/core"
-
-	// rago agent
-	"github.com/liliang-cn/rago/v2/pkg/agent"
-	"github.com/liliang-cn/rago/v2/pkg/skills"
+	"github.com/liliang-cn/askdoc/internal/repository"
 )
 
-// OrchestratorService integrates rago agent for document Q&A with full storage management
+// OrchestratorService integrates agent-go for document Q&A with full storage management
 type OrchestratorService struct {
 	cfg       *config.Config
 	ragClient *rag.Client
 
-	// Rago components
-	embedder      ragodomain.EmbedderProvider
-	generator     ragodomain.Generator
-	processor     ragodomain.Processor
-	documentStore *ragstore.DocumentStore
+	// Agent-go components
+	embedder      agentdomain.Embedder
+	generator     agentdomain.Generator
+	processor     agentdomain.Processor
+	documentStore agentdomain.DocumentStore
 	sqliteStore   *ragstore.SQLiteStore
-	sqvectCore    *sqvectcore.SQLiteStore // For chat session/message storage
 
 	// Agent service
 	agentService *agent.Service
+
+	// Session repository for conversation history
+	sessionRepo *repository.SessionRepository
 
 	// Progress callback for streaming
 	progressCallback func(eventType, message string)
 }
 
-// NewOrchestratorService creates a new orchestrator service with full rago agent integration
-func NewOrchestratorService(cfg *config.Config) (*OrchestratorService, error) {
-	// Create rago config
-	ragoCfg := &ragoconfig.Config{
-		Sqvect: ragoconfig.SqvectConfig{
-			DBPath:    cfg.RAG.DBPath,
-			IndexType: cfg.RAG.IndexType,
+// NewOrchestratorService creates a new orchestrator service with full agent-go integration
+func NewOrchestratorService(cfg *config.Config, sessionRepo *repository.SessionRepository) (*OrchestratorService, error) {
+	ctx := context.Background()
+
+	// Create agent-go config
+	agentCfg := &agentconfig.Config{
+		Home:  filepath.Dir(cfg.RAG.DBPath),
+		Debug: false,
+		RAG: agentconfig.RAGConfig{
+			Enabled:        true,
+			EmbeddingModel: cfg.LLM.EmbeddingModel,
+			Embedding: agentconfig.EmbeddingConfig{
+				Enabled:  true,
+				Strategy: pool.StrategyRoundRobin,
+				Providers: []pool.Provider{
+					{
+						Name:      "openai",
+						BaseURL:   cfg.LLM.BaseURL,
+						Key:       cfg.LLM.APIKey,
+						ModelName: cfg.LLM.EmbeddingModel,
+					},
+				},
+			},
 		},
-		Chunker: ragoconfig.ChunkerConfig{
-			ChunkSize: cfg.RAG.ChunkSize,
-			Overlap:   cfg.RAG.ChunkOverlap,
-		},
-		Ingest: ragoconfig.IngestConfig{
-			MetadataExtraction: ragoconfig.MetadataExtractionConfig{
-				Enable: false,
+		LLM: agentconfig.LLMConfig{
+			Enabled:  true,
+			Strategy: pool.StrategyRoundRobin,
+			Providers: []pool.Provider{
+				{
+					Name:      "openai",
+					BaseURL:   cfg.LLM.BaseURL,
+					Key:       cfg.LLM.APIKey,
+					ModelName: cfg.LLM.LLMModel,
+				},
 			},
 		},
 	}
+	agentCfg.ApplyHomeLayout()
 
-	// Create provider factory
-	factory := providers.NewFactory()
+	// Override the cortex DB path to use the same path as rag.DBPath
+	// so that the agent's RAG processor and orchestrator's vector store are aligned
+	ragDBDir := filepath.Dir(cfg.RAG.DBPath)
+	agentCfg.Internal.Storage.DBPath = filepath.Join(ragDBDir, "cortex.db")
 
-	// Create OpenAI-compatible provider config
-	providerCfg := &ragodomain.OpenAIProviderConfig{
-		BaseURL:        cfg.LLM.BaseURL,
-		APIKey:         cfg.LLM.APIKey,
-		EmbeddingModel: cfg.LLM.EmbeddingModel,
-		LLMModel:       cfg.LLM.LLMModel,
+	// Create provider pool service and initialize
+	poolSvc := services.GetGlobalPoolService()
+	if err := poolSvc.Initialize(ctx, agentCfg); err != nil {
+		return nil, fmt.Errorf("failed to initialize pool: %w", err)
 	}
 
-	ctx := context.Background()
-
-	// Create embedder
-	embedder, err := factory.CreateEmbedderProvider(ctx, providerCfg)
+	// Get LLM and embedder from pool
+	llmProvider, err := poolSvc.GetLLMService()
 	if err != nil {
-		return nil, fmt.Errorf("failed to create embedder: %w", err)
+		return nil, fmt.Errorf("failed to get LLM provider: %w", err)
 	}
 
-	// Create LLM generator
-	llmProvider, err := factory.CreateLLMProvider(ctx, providerCfg)
+	embedder, err := poolSvc.GetEmbeddingService(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create LLM provider: %w", err)
+		return nil, fmt.Errorf("failed to get embedder: %w", err)
 	}
 
-	// Create RAG client
-	ragClient, err := rag.NewClient(ragoCfg, embedder, llmProvider, nil)
+	// Create vector store using factory pattern
+	// Use the configured RAG.DBPath directly for orchestrator's own store
+	vectorStore, err := ragstore.NewVectorStore(ragstore.StoreConfig{
+		Type: "sqlite",
+		Parameters: map[string]interface{}{
+			"db_path":    cfg.RAG.DBPath,
+			"index_type": cfg.RAG.IndexType,
+		},
+	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to create RAG client: %w", err)
+		return nil, fmt.Errorf("failed to create vector store: %w", err)
 	}
 
-	// Create SQLite store for vector data (separate from metadata DB)
-	sqliteStore, err := ragstore.NewSQLiteStore(cfg.RAG.DBPath, cfg.RAG.IndexType)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create sqlite store: %w", err)
+	// Get SQLite store for direct access
+	sqliteStore, ok := vectorStore.(*ragstore.SQLiteStore)
+	if !ok {
+		return nil, fmt.Errorf("expected *SQLiteStore, got %T", vectorStore)
 	}
 
 	// Create document store
-	documentStore := ragstore.NewDocumentStore(sqliteStore.GetSqvectStore())
+	documentStore := ragstore.NewDocumentStoreFor(vectorStore)
 
-	// Create processor (GraphRAG is disabled by default in rago since v2.25.2)
-	proc := processor.New(
+	// Create RAG config for processor and client
+	ragCfg := &agentconfig.Config{
+		Home: filepath.Dir(cfg.RAG.DBPath),
+		RAG: agentconfig.RAGConfig{
+			Enabled:        true,
+			EmbeddingModel: cfg.LLM.EmbeddingModel,
+		},
+	}
+	ragCfg.ApplyHomeLayout()
+
+	// Create RAG client, passing our existing vectorStore so they share the same DB
+	ragClient, err := rag.NewClient(ragCfg, embedder, llmProvider, nil, vectorStore)
+
+	// Create processor
+	proc := ragprocessor.New(
 		embedder,
 		llmProvider,
-		nil, // chunker - will use default
+		chunker.New(),
 		sqliteStore,
 		documentStore,
-		ragoCfg,
+		ragCfg,
 		nil, // metadata extractor
 		nil, // memory service
 	)
 
-	// Create and load skills service if configured (before agent to enable PTC integration)
+	// Create and load skills service if configured
 	var skillsService *skills.Service
 	if cfg.RAG.SkillsPath != "" {
 		skillsPath, err := filepath.Abs(cfg.RAG.SkillsPath)
@@ -131,15 +171,19 @@ func NewOrchestratorService(cfg *config.Config) (*OrchestratorService, error) {
 		}
 	}
 
-	// Create agent service with RAG processor
+	// Create agent service using builder pattern
 	agentDBPath := cfg.RAG.DBPath + ".agent"
-	agentService, err := agent.NewService(
-		llmProvider, // Use our LLM provider
-		nil,         // mcpService
-		proc,        // ragProcessor
-		agentDBPath, // dbPath
-		nil,         // memoryService
-	)
+	agentService, err := agent.New("askdoc-agent").
+		WithLLM(llmProvider).
+		WithEmbedder(embedder).
+		WithRAG().
+		WithMCP().
+		WithDBPath(agentDBPath).
+		WithDebug(true).
+		WithProgressCallback(func(progress agent.ProgressEvent) {
+			log.Printf("[Agent] %s: %s", progress.Type, progress.Message)
+		}).
+		Build()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create agent service: %w", err)
 	}
@@ -155,8 +199,8 @@ func NewOrchestratorService(cfg *config.Config) (*OrchestratorService, error) {
 		processor:     proc,
 		documentStore: documentStore,
 		sqliteStore:   sqliteStore,
-		sqvectCore:    sqliteStore.GetSqvectStore(),
 		agentService:  agentService,
+		sessionRepo:   sessionRepo,
 	}, nil
 }
 
@@ -166,7 +210,7 @@ func (s *OrchestratorService) SetProgressCallback(cb func(eventType, message str
 }
 
 // IngestFile ingests a file into the vector store
-func (s *OrchestratorService) IngestFile(ctx context.Context, filePath string, metadata map[string]any) (*ragodomain.IngestResponse, error) {
+func (s *OrchestratorService) IngestFile(ctx context.Context, filePath string, metadata map[string]any) (*agentdomain.IngestResponse, error) {
 	opts := &rag.IngestOptions{
 		ChunkSize: s.cfg.RAG.ChunkSize,
 		Overlap:   s.cfg.RAG.ChunkOverlap,
@@ -176,7 +220,7 @@ func (s *OrchestratorService) IngestFile(ctx context.Context, filePath string, m
 }
 
 // IngestText ingests text content into the vector store
-func (s *OrchestratorService) IngestText(ctx context.Context, text, source string, metadata map[string]any) (*ragodomain.IngestResponse, error) {
+func (s *OrchestratorService) IngestText(ctx context.Context, text, source string, metadata map[string]any) (*agentdomain.IngestResponse, error) {
 	opts := &rag.IngestOptions{
 		ChunkSize: s.cfg.RAG.ChunkSize,
 		Overlap:   s.cfg.RAG.ChunkOverlap,
@@ -249,15 +293,49 @@ func (s *OrchestratorService) ChatStream(ctx context.Context, message string, co
 		// Send session_id to client
 		ch <- askdocdomain.StreamChunk{Type: "session", SessionID: sessionID}
 
-		// Use rago Agent's RunStream for intelligent multi-turn RAG queries
-		eventChan, err := s.agentService.RunStream(ctx, message)
+		// First, do a RAG search to get relevant context
+		ch <- askdocdomain.StreamChunk{Type: "thinking", Content: "Searching documents..."}
+
+		vec, err := s.embedder.Embed(ctx, message)
+		if err != nil {
+			ch <- askdocdomain.StreamChunk{Type: "error", Content: fmt.Sprintf("Embedding failed: %v", err)}
+			return
+		}
+
+		chunks, err := s.sqliteStore.Search(ctx, vec, 5)
+		if err != nil {
+			ch <- askdocdomain.StreamChunk{Type: "error", Content: fmt.Sprintf("Search failed: %v", err)}
+			return
+		}
+
+		// Build context from search results
+		var contextBuilder strings.Builder
+		ragSources := make([]agentdomain.Chunk, len(chunks))
+		for i, chunk := range chunks {
+			contextBuilder.WriteString(fmt.Sprintf("[Document %d]\n%s\n\n", i+1, chunk.Content))
+			ragSources[i] = agentdomain.Chunk{
+				DocumentID: chunk.DocumentID,
+				Content:    chunk.Content,
+				Score:     chunk.Score,
+			}
+		}
+		contextStr := contextBuilder.String()
+
+		if len(chunks) == 0 {
+			ch <- askdocdomain.StreamChunk{Type: "thinking", Content: "No relevant documents found."}
+		} else {
+			ch <- askdocdomain.StreamChunk{Type: "thinking", Content: fmt.Sprintf("Found %d relevant documents.", len(chunks))}
+		}
+
+		// Now call the agent with the message prefixed by RAG context
+		ragMessage := fmt.Sprintf("Context from documents:\n%s\n\nUser question: %s", contextStr, message)
+		eventChan, err := s.agentService.RunStream(ctx, ragMessage)
 		if err != nil {
 			ch <- askdocdomain.StreamChunk{Type: "error", Content: fmt.Sprintf("Failed to start agent: %v", err)}
 			return
 		}
 
 		var fullAnswer strings.Builder
-		var ragSources []ragodomain.Chunk
 
 		// Process streaming events from agent
 		for evt := range eventChan {
@@ -278,7 +356,7 @@ func (s *OrchestratorService) ChatStream(ctx context.Context, message string, co
 				if fullAnswer.Len() == 0 && evt.Content != "" {
 					fullAnswer.WriteString(evt.Content)
 				}
-				// Collect sources from agent (v2.41.1+ includes sources from prepareContext)
+				// Use our pre-fetched sources instead of agent's
 				if len(evt.Sources) > 0 {
 					ragSources = evt.Sources
 				}
@@ -316,8 +394,8 @@ func (s *OrchestratorService) ChatStream(ctx context.Context, message string, co
 	return ch, nil
 }
 
-// convertRagoSources converts rago domain.Chunk to askdoc Source
-func convertRagoSources(chunks []ragodomain.Chunk) []askdocdomain.Source {
+// convertRagoSources converts agent-go domain.Chunk to askdoc Source
+func convertRagoSources(chunks []agentdomain.Chunk) []askdocdomain.Source {
 	if len(chunks) == 0 {
 		return nil
 	}
@@ -471,11 +549,15 @@ func (s *OrchestratorService) UpdateDocumentMetadata(ctx context.Context, id str
 		doc.Metadata[k] = v
 	}
 
-	return s.documentStore.Update(ctx, doc)
+	// Delete and re-store since DocumentStore doesn't have Update
+	if err := s.documentStore.Delete(ctx, doc.ID); err != nil {
+		return fmt.Errorf("failed to delete document for update: %w", err)
+	}
+	return s.documentStore.Store(ctx, doc)
 }
 
-// ragoDocToAskDoc converts rago Document to AskDoc Document
-func ragoDocToAskDoc(doc ragodomain.Document) *askdocdomain.Document {
+// ragoDocToAskDoc converts agent-go Document to AskDoc Document
+func ragoDocToAskDoc(doc agentdomain.Document) *askdocdomain.Document {
 	result := &askdocdomain.Document{
 		ID:        doc.ID,
 		Metadata:  doc.Metadata,
@@ -523,12 +605,12 @@ func (s *OrchestratorService) GetRAGClient() *rag.Client {
 }
 
 // GetProcessor returns the processor for direct access
-func (s *OrchestratorService) GetProcessor() ragodomain.Processor {
+func (s *OrchestratorService) GetProcessor() agentdomain.Processor {
 	return s.processor
 }
 
 // GetDocumentStore returns the document store
-func (s *OrchestratorService) GetDocumentStore() *ragstore.DocumentStore {
+func (s *OrchestratorService) GetDocumentStore() agentdomain.DocumentStore {
 	return s.documentStore
 }
 

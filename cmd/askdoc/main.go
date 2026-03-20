@@ -51,7 +51,7 @@ func main() {
 	sessionRepo := repository.NewSessionRepository(db)
 
 	// Initialize Orchestrator Service (integrates rago for RAG and document storage)
-	orchestrator, err := service.NewOrchestratorService(cfg)
+	orchestrator, err := service.NewOrchestratorService(cfg, sessionRepo)
 	if err != nil {
 		logger.Warn("Failed to initialize Orchestrator, running without RAG", zap.Error(err))
 		// Continue without orchestrator - will use placeholder responses
